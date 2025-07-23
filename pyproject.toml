@@ -1,0 +1,27 @@
+[project]
+name = "jjdiff"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Daan van der Kallen", email = "mail@daanvdk.com" }
+]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+jjdiff = "jjdiff:main"
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+reportUnusedCallResult = false
+
+[build-system]
+requires = ["uv_build>=0.8.0,<0.9"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.1",
+]
