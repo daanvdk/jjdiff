@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 import os
 from pathlib import Path
 import signal
@@ -9,10 +10,31 @@ import sys
 import termios
 import tty
 from types import FrameType
-from typing import override
+from typing import cast, override
 
 from .keyboard import Keyboard
-from .change import Change, Line, LineStatus
+from .change import (
+    FILE_CHANGE_TYPES,
+    AddBinary,
+    AddFile,
+    AddSymlink,
+    Change,
+    ChangeInclude,
+    ChangeMode,
+    DeleteBinary,
+    DeleteFile,
+    DeleteSymlink,
+    FileChange,
+    Include,
+    Line,
+    LineInclude,
+    LineStatus,
+    ModifyBinary,
+    ModifyFile,
+    ModifySymlink,
+    Rename,
+    filter_changes,
+)
 from .drawable import Drawable
 from .rows import Rows
 from .fill import Fill
@@ -100,20 +122,6 @@ class LineCursor:
 type Cursor = ChangeCursor | HunkCursor | LineCursor
 
 
-@dataclass(frozen=True)
-class ChangeInclude:
-    change: int
-
-
-@dataclass(frozen=True)
-class LineInclude:
-    change: int
-    line: int
-
-
-type Include = ChangeInclude | LineInclude
-
-
 class Action(ABC):
     @abstractmethod
     def apply(self, editor: "Editor") -> None:
@@ -155,7 +163,7 @@ class RemoveIncludes(Action):
 
 
 class Editor:
-    changes: list[Change]
+    changes: Sequence[Change]
     includes: set[Include]
     include_dependencies: dict[Include, set[Include]]
     include_dependants: dict[Include, set[Include]]
@@ -164,7 +172,7 @@ class Editor:
     should_draw: bool
     should_exit: bool
     is_reading: bool
-    result: list[Change] | None
+    result: Iterator[Change] | None
 
     drawable: Drawable
     width: int
@@ -176,64 +184,15 @@ class Editor:
     undo_stack: list[tuple[Action, Cursor]]
     redo_stack: list[tuple[Action, Cursor]]
 
-    def __init__(self, changes: list[Change]):
+    def __init__(self, changes: Sequence[Change]):
         self.changes = changes
-        self.includes = set()
         self.include_dependencies = {}
         self.include_dependants = {}
+        self.add_dependencies()
 
-        self.should_render = True
-        self.should_draw = True
-        self.should_exit = False
-        self.is_reading = False
-        self.result = None
-
+        self.includes = set()
         self.undo_stack = []
         self.redo_stack = []
-
-        added: dict[Path, Include] = {}
-        deleted: dict[Path, Include] = {}
-
-        # Set dependencies
-        for change_index, change in enumerate(self.changes):
-            match change.status:
-                case "added":
-                    change_include = ChangeInclude(change_index)
-
-                    # For a file or directory to be added its predecessor must be removed
-                    if predecessor := deleted.pop(change.path, None):
-                        self.add_dependency(change_include, predecessor)
-
-                    # For a file or directory to be added its parent must be added
-                    if parent := added.get(change.path.parent):
-                        self.add_dependency(change_include, parent)
-
-                    # For a line to be added the file must be added
-                    for line_index, line in enumerate(change.lines or []):
-                        assert line.status == "added"
-                        line_include = LineInclude(change_index, line_index)
-                        self.add_dependency(line_include, change_include)
-
-                    added[change.path] = change_include
-
-                case "changed":
-                    pass
-
-                case "deleted":
-                    change_include = ChangeInclude(change_index)
-
-                    # For a directory to be deleted all its children must be deleted
-                    for child_path, child in deleted.items():
-                        if child_path.parent == change.path:
-                            self.add_dependency(change_include, child)
-
-                    # For a file to be deleted all lines must be deleted
-                    for line_index, line in enumerate(change.lines or []):
-                        assert line.status == "deleted"
-                        line_include = LineInclude(change_index, line_index)
-                        self.add_dependency(change_include, line_include)
-
-                    deleted[change.path] = change_include
 
         self.cursor = ChangeCursor(0)
         self.drawable = Text("")
@@ -241,6 +200,58 @@ class Editor:
         self.height = 0
         self.y = 0
         self.lines = []
+
+        self.should_render = True
+        self.should_draw = True
+        self.should_exit = False
+        self.is_reading = False
+        self.result = None
+
+    def add_dependencies(self) -> None:
+        self.add_delete_add_dependencies()
+        self.add_line_dependencies()
+
+    def add_delete_add_dependencies(self) -> None:
+        # Add dependencies between deletes and adds on the same path
+        deleted: dict[Path, Include] = {}
+
+        for change_index, change in enumerate(self.changes):
+            match change:
+                case DeleteFile(path) | DeleteBinary(path) | DeleteSymlink(path):
+                    deleted[path] = ChangeInclude(change_index)
+
+                case AddFile(path) | AddBinary(path) | AddSymlink(path):
+                    try:
+                        dependency = deleted[path]
+                    except KeyError:
+                        pass
+                    else:
+                        dependant = ChangeInclude(change_index)
+                        self.add_dependency(dependant, dependency)
+
+                case _:
+                    pass
+
+    def add_line_dependencies(self) -> None:
+        # Add dependencies between changes and lines in changes
+        for change_index, change in enumerate(self.changes):
+            match change:
+                case AddFile(_, lines):
+                    # All lines in an added file depend on the file being added
+                    change_include = ChangeInclude(change_index)
+                    for line_index in range(len(lines)):
+                        line_include = LineInclude(change_index, line_index)
+                        self.add_dependency(line_include, change_include)
+
+                case DeleteFile(_, lines):
+                    # A deleted file depends on all lines being deleted
+                    change_include = ChangeInclude(change_index)
+                    for line_index in range(len(lines)):
+                        line_include = LineInclude(change_index, line_index)
+                        self.add_dependency(change_include, line_include)
+
+                case _:
+                    pass
 
     def add_dependency(self, dependant: Include, dependency: Include) -> None:
         self.include_dependencies.setdefault(dependant, set()).add(dependency)
@@ -254,29 +265,17 @@ class Editor:
             case ChangeCursor(change):
                 changes.extend(self.changes[:change])
 
-            case HunkCursor(change, start, _end):
+            case HunkCursor(change, line) | LineCursor(change, line):
                 changes.extend(self.changes[:change])
-                selected_change = self.changes[change]
-                assert selected_change.lines is not None
-                changes.append(
-                    Change(
-                        selected_change.path,
-                        selected_change.status,
-                        selected_change.lines[:start],
-                    )
-                )
-
-            case LineCursor(change, line):
-                changes.extend(self.changes[:change])
-                selected_change = self.changes[change]
-                assert selected_change.lines is not None
-                changes.append(
-                    Change(
-                        selected_change.path,
-                        selected_change.status,
-                        selected_change.lines[:line],
-                    )
-                )
+                match self.changes[change]:
+                    case AddFile(path, lines, is_exec):
+                        changes.append(AddFile(path, lines[:line], is_exec))
+                    case ModifyFile(path, lines):
+                        changes.append(ModifyFile(path, lines[:line]))
+                    case DeleteFile(path, lines, is_exec):
+                        changes.append(DeleteFile(path, lines[:line], is_exec))
+                    case _:
+                        pass  # never happens
 
         cursor_start = render_changes(changes, self.cursor, self.includes).height(width)
 
@@ -286,22 +285,14 @@ class Editor:
                 changes.append(self.changes[change])
 
             case HunkCursor(change, start, end):
-                selected_change = self.changes[change]
-                assert selected_change.lines is not None
-
-                partial_change = changes[-1]
-                assert partial_change.lines is not None
-
-                partial_change.lines.extend(selected_change.lines[start:end])
+                partial_lines = cast(FileChange, changes[-1]).lines
+                change_lines = cast(FileChange, self.changes[change]).lines
+                partial_lines.extend(change_lines[start:end])
 
             case LineCursor(change, line):
-                selected_change = self.changes[change]
-                assert selected_change.lines is not None
-
-                partial_change = changes[-1]
-                assert partial_change.lines is not None
-
-                partial_change.lines.append(selected_change.lines[line])
+                partial_lines = cast(FileChange, changes[-1]).lines
+                change_lines = cast(FileChange, self.changes[change]).lines
+                partial_lines.append(change_lines[line])
 
         cursor_end = render_changes(changes, self.cursor, self.includes).height(width)
 
@@ -327,7 +318,7 @@ class Editor:
                 max(self.y, end + EDGE_PADDING - self.height),
                 start - EDGE_PADDING,
             )
-            self.y = min(max(self.y, 0), len(self.lines) - self.height)
+            self.y = max(min(self.y, len(self.lines) - self.height), 0)
 
         sys.stdout.write("\x1b[2J\x1b[H")
         for line in self.lines[self.y : self.y + self.height]:
@@ -364,12 +355,12 @@ class Editor:
                 self.exit()
             case "h" | "left":
                 self.grow_cursor()
-            case "j" | "down":
-                self.next_cursor()
-            case "k" | "up":
-                self.prev_cursor()
             case "l" | "right":
                 self.shrink_cursor()
+            case "k" | "up" | "shift+tab":
+                self.prev_cursor()
+            case "j" | "down" | "tab":
+                self.next_cursor()
             case " ":
                 self.toggle_cursor()
             case "u":
@@ -383,192 +374,215 @@ class Editor:
 
     def prev_cursor(self) -> None:
         match self.cursor:
-            case ChangeCursor(change):
-                self.cursor = ChangeCursor((change - 1) % len(self.changes))
+            case ChangeCursor(change_index):
+                self.cursor = ChangeCursor((change_index - 1) % len(self.changes))
                 self.rerender()
 
-            case HunkCursor(change, start, end):
+            case HunkCursor(change_index, start, end):
                 while True:
-                    lines = self.changes[change].lines
-                    assert lines is not None
+                    change = cast(FileChange, self.changes[change_index])
 
+                    # Try to find the previous hunk end
                     end = start
-
                     while end > 0:
-                        if lines[end - 1].status != "unchanged":
+                        if change.lines[end - 1].status != "unchanged":
                             break
                         end -= 1
                     else:
+                        # No hunk found, so go to the previous file change and
+                        # try again
                         while True:
-                            change = (change - 1) % len(self.changes)
-                            lines = self.changes[change].lines
-                            if lines is not None:
+                            change_index = (change_index - 1) % len(self.changes)
+                            prev_change = self.changes[change_index]
+                            if isinstance(prev_change, FILE_CHANGE_TYPES):
+                                change = prev_change
                                 break
 
-                        start = len(lines)
-                        end = len(lines)
+                        start = len(change.lines)
+                        end = len(change.lines)
                         continue
 
+                    # Find the start of the hunk
                     start = end - 1
-                    while start > 0 and lines[start - 1].status != "unchanged":
+                    while start > 0 and change.lines[start - 1].status != "unchanged":
                         start -= 1
 
-                    self.cursor = HunkCursor(change, start, end)
+                    self.cursor = HunkCursor(change_index, start, end)
                     self.rerender()
                     break
 
-            case LineCursor(change, line):
-                line -= 1
-
+            case LineCursor(change_index, line):
                 while True:
-                    lines = self.changes[change].lines
-                    assert lines is not None
+                    change = cast(FileChange, self.changes[change_index])
 
+                    # Try to find the previous line
                     while line > 0:
-                        if lines[line].status != "unchanged":
-                            break
                         line -= 1
+                        if change.lines[line].status != "unchanged":
+                            break
                     else:
+                        # No line found, so go to the previous file change and
+                        # try again
                         while True:
-                            change = (change - 1) % len(self.changes)
-                            lines = self.changes[change].lines
-                            if lines is not None:
+                            change_index = (change_index - 1) % len(self.changes)
+                            prev_change = self.changes[change_index]
+                            if isinstance(prev_change, FILE_CHANGE_TYPES):
+                                change = prev_change
                                 break
 
-                        line = len(lines) - 1
+                        line = len(change.lines)
                         continue
 
-                    self.cursor = LineCursor(change, line)
+                    self.cursor = LineCursor(change_index, line)
                     self.rerender()
                     break
 
     def next_cursor(self) -> None:
         match self.cursor:
-            case ChangeCursor(change):
-                self.cursor = ChangeCursor((change + 1) % len(self.changes))
+            case ChangeCursor(change_index):
+                self.cursor = ChangeCursor((change_index + 1) % len(self.changes))
                 self.rerender()
 
-            case HunkCursor(change, start, end):
+            case HunkCursor(change_index, start, end):
                 while True:
-                    lines = self.changes[change].lines
-                    assert lines is not None
+                    change = cast(FileChange, self.changes[change_index])
 
+                    # Try to find the next hunk start
                     start = end
-
-                    while start < len(lines):
-                        if lines[start].status != "unchanged":
+                    while start < len(change.lines):
+                        if change.lines[start].status != "unchanged":
                             break
                         start += 1
                     else:
+                        # No hunk found, so go to the next file change and
+                        # try again
                         while True:
-                            change = (change + 1) % len(self.changes)
-                            if self.changes[change].lines is not None:
+                            change_index = (change_index + 1) % len(self.changes)
+                            next_change = self.changes[change_index]
+                            if isinstance(next_change, FILE_CHANGE_TYPES):
+                                change = next_change
                                 break
 
                         start = 0
                         end = 0
                         continue
 
+                    # Find the end of the hunk
                     end = start + 1
-                    while end < len(lines) and lines[end].status != "unchanged":
+                    while (
+                        end < len(change.lines)
+                        and change.lines[end].status != "unchanged"
+                    ):
                         end += 1
 
-                    self.cursor = HunkCursor(change, start, end)
+                    self.cursor = HunkCursor(change_index, start, end)
                     self.rerender()
                     break
 
-            case LineCursor(change, line):
-                line += 1
-
+            case LineCursor(change_index, line):
                 while True:
-                    lines = self.changes[change].lines
-                    assert lines is not None
+                    change = cast(FileChange, self.changes[change_index])
 
-                    while line < len(lines):
-                        if lines[line].status != "unchanged":
-                            break
+                    # Try to find the next line
+                    while line < len(change.lines) - 1:
                         line += 1
+                        if change.lines[line].status != "unchanged":
+                            break
                     else:
+                        # No line found, so go to the next file change and
+                        # try again
                         while True:
-                            change = (change + 1) % len(self.changes)
-                            if self.changes[change].lines is not None:
+                            change_index = (change_index + 1) % len(self.changes)
+                            next_change = self.changes[change_index]
+                            if isinstance(next_change, FILE_CHANGE_TYPES):
+                                change = next_change
                                 break
 
-                        line = 0
+                        line = -1
                         continue
 
-                    self.cursor = LineCursor(change, line)
+                    self.cursor = LineCursor(change_index, line)
                     self.rerender()
                     break
 
     def grow_cursor(self) -> None:
         match self.cursor:
-            case ChangeCursor(_change):
+            case ChangeCursor():
                 pass
 
-            case HunkCursor(change, _start, _end):
-                self.cursor = ChangeCursor(change)
+            case HunkCursor(change_index):
+                self.cursor = ChangeCursor(change_index)
                 self.rerender()
 
-            case LineCursor(change, line):
-                lines = self.changes[change].lines
-                assert lines is not None
+            case LineCursor(change_index, line):
+                change = cast(FileChange, self.changes[change_index])
 
+                # Find hunk start
                 start = line
-                while start > 0 and lines[start - 1].status != "unchanged":
+                while start > 0 and change.lines[start - 1].status != "unchanged":
                     start -= 1
 
+                # Find hunk end
                 end = line + 1
-                while end < len(lines) and lines[end].status != "unchanged":
+                while (
+                    end < len(change.lines) and change.lines[end].status != "unchanged"
+                ):
                     end += 1
 
-                self.cursor = HunkCursor(change, start, end)
+                self.cursor = HunkCursor(change_index, start, end)
                 self.rerender()
 
     def shrink_cursor(self) -> None:
         match self.cursor:
-            case ChangeCursor(change):
-                lines = self.changes[change].lines
-                if lines is None:
+            case ChangeCursor(change_index):
+                change = self.changes[change_index]
+                if not isinstance(change, FILE_CHANGE_TYPES):
                     return
 
+                # Find start of first hunk
                 start = 0
-                while lines[start].status == "unchanged":
+                while change.lines[start].status == "unchanged":
                     start += 1
 
+                # Find end of hunk
                 end = start + 1
-                while end < len(lines) and lines[end].status != "unchanged":
+                while (
+                    end < len(change.lines) and change.lines[end].status != "unchanged"
+                ):
                     end += 1
 
-                self.cursor = HunkCursor(change, start, end)
+                self.cursor = HunkCursor(change_index, start, end)
                 self.rerender()
 
-            case HunkCursor(change, start, _):
+            case HunkCursor(change, start):
                 self.cursor = LineCursor(change, start)
                 self.rerender()
 
-            case LineCursor(_change, _line):
+            case LineCursor():
                 pass
 
     def toggle_cursor(self) -> None:
         includes: set[Include] = set()
 
         match self.cursor:
-            case ChangeCursor(change):
-                if self.changes[change].status != "changed":
-                    includes.add(ChangeInclude(change))
+            case ChangeCursor(change_index):
+                change = self.changes[change_index]
 
-                lines = self.changes[change].lines
-                if lines is not None:
-                    for line in range(len(lines)):
-                        includes.add(LineInclude(change, line))
+                # For modify file the change itself does nothing, just the lines matter
+                if not isinstance(change, ModifyFile):
+                    includes.add(ChangeInclude(change_index))
 
-            case HunkCursor(change, start, end):
-                for line in range(start, end):
-                    includes.add(LineInclude(change, line))
+                # For file changes we care about the lines
+                if isinstance(change, FILE_CHANGE_TYPES):
+                    for line_index in range(len(change.lines)):
+                        includes.add(LineInclude(change_index, line_index))
 
-            case LineCursor(change, line):
-                includes.add(LineInclude(change, line))
+            case HunkCursor(change_index, start, end):
+                for line_index in range(start, end):
+                    includes.add(LineInclude(change_index, line_index))
+
+            case LineCursor(change_index, line_index):
+                includes.add(LineInclude(change_index, line_index))
 
         new_includes = includes - self.includes
 
@@ -627,43 +641,7 @@ class Editor:
         self.rerender()
 
     def commit(self) -> None:
-        self.result = []
-
-        for change_index, change in enumerate(self.changes):
-            change_include = ChangeInclude(change_index)
-
-            lines: list[Line] | None
-            line_changes = False
-
-            if change.lines is None:
-                lines = None
-            else:
-                lines = []
-
-                for line_index, line in enumerate(change.lines):
-                    line_include = LineInclude(change_index, line_index)
-
-                    if line_include in self.includes:
-                        lines.append(line)
-                        line_changes = True
-                    elif line.old is not None:
-                        lines.append(Line(line.old, line.old))
-
-            match change.status:
-                case "added":
-                    if change_include in self.includes:
-                        self.result.append(Change(change.path, "added", lines))
-
-                case "changed":
-                    if line_changes:
-                        self.result.append(Change(change.path, "changed", lines))
-
-                case "deleted":
-                    if change_include in self.includes:
-                        self.result.append(Change(change.path, "deleted", lines))
-                    elif line_changes:
-                        self.result.append(Change(change.path, "changed", lines))
-
+        self.result = filter_changes(self.includes, self.changes)
         self.exit()
 
     def apply_action(self, action: Action) -> None:
@@ -682,7 +660,10 @@ class Editor:
             raise ReadCancelled()
 
 
-def edit_changes(changes: list[Change]) -> list[Change]:
+def edit_changes(changes: Sequence[Change]) -> Iterator[Change]:
+    if not changes:
+        return iter([])
+
     editor = Editor(changes)
     keyboard = Keyboard()
 
@@ -735,16 +716,17 @@ MIN_OMITTED = 2
 
 
 def render_changes(
-    changes: list[Change],
+    changes: Sequence[Change],
     cursor: Cursor,
     includes: set[Include],
 ) -> Drawable:
     drawables: list[Drawable] = []
+    renames: dict[Path, Path] = {}
 
     for i, change in enumerate(changes):
         if drawables:
             drawables.append(Text())
-        drawables.append(render_change(i, change, cursor, includes))
+        drawables.append(render_change(i, change, cursor, includes, renames))
 
     return Rows(drawables)
 
@@ -754,24 +736,38 @@ def render_change(
     change: Change,
     cursor: Cursor,
     includes: set[Include],
+    renames: dict[Path, Path],
 ) -> Drawable:
     drawables = [
         render_change_title(
             change,
             cursor.is_title_selected(change_index),
             ChangeInclude(change_index) in includes,
+            renames,
         )
     ]
 
-    if change.lines is not None:
-        drawables.append(
-            render_change_lines(
-                change_index,
-                change.lines,
-                cursor,
-                includes,
-            )
-        )
+    match change:
+        case Rename() | ChangeMode():
+            pass
+
+        case AddFile(_, lines) | ModifyFile(_, lines) | DeleteFile(_, lines):
+            drawables.append(render_change_lines(change_index, lines, cursor, includes))
+
+        case AddBinary() | ModifyBinary() | DeleteBinary():
+            drawables.append(render_binary(change_index, cursor))
+
+        case AddSymlink(_, new_to):
+            lines = [Line(None, str(new_to))]
+            drawables.append(render_change_lines(change_index, lines, cursor))
+
+        case ModifySymlink(old_to, new_to):
+            lines = [Line(str(old_to), str(new_to))]
+            drawables.append(render_change_lines(change_index, lines, cursor))
+
+        case DeleteSymlink(old_to):
+            lines = [Line(str(old_to), None)]
+            drawables.append(render_change_lines(change_index, lines, cursor))
 
     return Rows(drawables)
 
@@ -780,7 +776,7 @@ def render_change_lines(
     change_index: int,
     lines: list[Line],
     cursor: Cursor,
-    includes: set[Include],
+    includes: set[Include] | None = None,
 ) -> Drawable:
     drawables: list[Drawable] = []
     ranges: list[tuple[int, int]] = []
@@ -830,12 +826,51 @@ def render_change_lines(
 
         for line_index, line in enumerate(lines[start:end], start):
             selected = cursor.is_line_selected(change_index, line_index)
-            included = LineInclude(change_index, line_index) in includes
+            if includes is None:
+                included = None
+            else:
+                included = LineInclude(change_index, line_index) in includes
+
+            underline_old: list[tuple[int, int]] = []
+            underline_new: list[tuple[int, int]] = []
+
+            if line.old is not None and line.new is not None:
+                for op, old_start, old_end, new_start, new_end in SequenceMatcher(
+                    None, line.old, line.new
+                ).get_opcodes():
+                    if op == "delete" or op == "replace":
+                        underline_old.append((old_start, old_end))
+                    if op == "insert" or op == "replace":
+                        underline_new.append((new_start, new_end))
+
+            old_line_status: LineStatus
+            new_line_status: LineStatus
+
+            if line.status == "changed":
+                old_line_status = "deleted"
+                new_line_status = "added"
+            else:
+                old_line_status = line.status
+                new_line_status = line.status
 
             rows.append(
                 (
-                    *render_line(old_line, line.status, line.old, selected, included),
-                    *render_line(new_line, line.status, line.new, selected, included),
+                    *render_line(
+                        old_line,
+                        old_line_status,
+                        line.old,
+                        selected,
+                        included,
+                        underline_old,
+                    ),
+                    *render_line(
+                        new_line,
+                        new_line_status,
+                        line.new,
+                        selected,
+                        included,
+                        underline_new,
+                    ),
                 )
             )
 
@@ -858,32 +893,103 @@ def render_change_lines(
     return Rows(drawables)
 
 
-def render_change_title(change: Change, selected: bool, included: bool) -> Drawable:
-    fg = STATUS_COLOR[change.status]
+def render_change_title(
+    change: Change,
+    selected: bool,
+    included: bool,
+    renames: dict[Path, Path],
+) -> Drawable:
+    fg: TextColor
+
+    match change:
+        case Rename(path):
+            action = "rename"
+            file_type = "path"
+            fg = "blue"
+
+        case ChangeMode(path):
+            action = "change mode"
+            file_type = "file"
+            fg = "blue"
+
+        case AddFile(path):
+            action = "add"
+            file_type = "file"
+            fg = "green"
+
+        case AddBinary(path):
+            action = "add"
+            file_type = "file"
+            fg = "green"
+
+        case AddSymlink(path):
+            action = "add"
+            file_type = "symlink"
+            fg = "green"
+
+        case ModifyFile(path):
+            action = "modify"
+            file_type = "file"
+            fg = "yellow"
+
+        case ModifyBinary(path):
+            action = "modify"
+            file_type = "file"
+            fg = "yellow"
+
+        case ModifySymlink(path):
+            action = "modify"
+            file_type = "symlink"
+            fg = "yellow"
+
+        case DeleteFile(path):
+            action = "delete"
+            file_type = "file"
+            fg = "red"
+
+        case DeleteBinary(path):
+            action = "delete"
+            file_type = "file"
+            fg = "red"
+
+        case DeleteSymlink(path):
+            action = "delete"
+            file_type = "symlink"
+            fg = "red"
+
     bg = SELECTED_BG[selected]
 
-    if change.status == "changed":
+    if isinstance(change, Rename):
+        renames[change.old_path] = change.new_path
+    else:
+        path = renames.get(path, path)
+
+    if isinstance(change, ModifyFile):
         assert not included
-        status_text = Text(f"\u258c  {change.status} ", TextStyle(fg=fg, bg=bg))
+        action_text = Text(f"\u258c  {action} ", TextStyle(fg=fg, bg=bg))
     elif included:
-        status_text = Text.join(
+        action_text = Text.join(
             [
-                Text(
-                    f" \u2713 {change.status}", TextStyle(fg="black", bg=fg, bold=True)
-                ),
+                Text(f" \u2713 {action}", TextStyle(fg="black", bg=fg, bold=True)),
                 Text("\u258c", TextStyle(fg=fg, bg=bg)),
             ]
         )
     else:
-        status_text = Text(f"\u258c\u2717 {change.status} ", TextStyle(fg=fg, bg=bg))
+        action_text = Text(f"\u258c\u2717 {action} ", TextStyle(fg=fg, bg=bg))
 
-    return Text.join(
-        [
-            status_text,
-            Text(f"{change.type} ", TextStyle(bg=bg, bold=included)),
-            Text(str(change.path), TextStyle(fg="blue", bg=bg, bold=included)),
-        ]
-    )
+    texts = [
+        action_text,
+        Text(f"{file_type} ", TextStyle(bg=bg, bold=included)),
+        Text(str(path), TextStyle(fg="blue", bg=bg, bold=included)),
+    ]
+
+    if isinstance(change, Rename):
+        texts.append(Text(" to ", TextStyle(bg=bg, bold=included)))
+        texts.append(
+            Text(str(change.new_path), TextStyle(fg="blue", bg=bg, bold=included))
+        )
+
+    return Text.join(texts)
 
 
 def render_omitted(lines: int, selected: bool) -> Drawable:
@@ -915,7 +1021,8 @@ def render_line(
     status: LineStatus,
     content: str | None,
     selected: bool,
-    included: bool,
+    included: bool | None,
+    underline: list[tuple[int, int]],
 ) -> tuple[Drawable, Drawable]:
     gutter: Drawable
     drawable: Drawable
@@ -932,9 +1039,9 @@ def render_line(
         bg = SELECTED_BG[selected]
 
         gutter = Text(f"\u258f {line:>4} ", TextStyle(fg=fg, bg=bg))
-        drawable = Text(content, TextStyle(bg=bg))
+        drawable = render_line_content(content, underline, TextStyle(bg=bg))
 
-    elif included:
+    elif included is True:
         fg = STATUS_COLOR[status]
         bg = SELECTED_BG[selected]
 
@@ -944,13 +1051,78 @@ def render_line(
                 Text("\u258c", TextStyle(fg=fg, bg=bg)),
             ]
         )
-        drawable = Text(content, TextStyle(fg=fg, bg=bg, bold=True, italic=True))
+
+        drawable = render_line_content(
+            content,
+            underline,
+            TextStyle(fg=fg, bg=bg, bold=True, italic=True),
+        )
+
+    elif included is False:
+        fg = STATUS_COLOR[status]
+        bg = SELECTED_BG[selected]
+
+        gutter = Text(f"\u258c\u2717{line:>4} ", TextStyle(fg=fg, bg=bg))
+        drawable = render_line_content(content, underline, TextStyle(fg=fg, bg=bg))
 
     else:
         fg = STATUS_COLOR[status]
         bg = SELECTED_BG[selected]
 
-        gutter = Text(f"\u258c\u2717{line:>4} ", TextStyle(fg=fg, bg=bg))
-        drawable = Text(content, TextStyle(fg=fg, bg=bg))
+        gutter = Text(f"\u258c {line:>4} ", TextStyle(fg=fg, bg=bg))
+        drawable = render_line_content(content, underline, TextStyle(fg=fg, bg=bg))
 
     return gutter, drawable
+
+
+def render_line_content(
+    content: str,
+    underline: list[tuple[int, int]],
+    style: TextStyle,
+) -> Text:
+    underlined_style = style.update(underline=True)
+
+    texts: list[Text] = []
+    index = 0
+
+    for start, end in underline:
+        texts.append(Text(content[index:start], style))
+        texts.append(Text(content[start:end], underlined_style))
+        index = end
+    texts.append(Text(content[index:], style))
+
+    return Text.join(texts)
+
+
+def render_binary(change_index: int, cursor: Cursor) -> Drawable:
+    selected = cursor.is_all_lines_selected(change_index)
+
+    fg = SELECTED_FG[selected]
+    bg = SELECTED_BG[selected]
+
+    line_style = TextStyle(fg=fg, bg=bg)
+    text_style = TextStyle(fg="white", bg=bg)
+
+    hor = Fill("\u2500", line_style)
+    ver = Text("\u2502", line_style)
+
+    top_left = Text("\u256d", line_style)
+    top_right = Text("\u256e", line_style)
+    bot_left = Text("\u2570", line_style)
+    bot_right = Text("\u256f", line_style)
+
+    text = Text("cannot display binary file", text_style)
+    fill = Fill(" ", line_style)
+
+    return Grid(
+        (None, 1, None, 1, None),
+        [
+            (top_left, hor, hor, hor, top_right),
+            (ver, fill, fill, fill, ver),
+            (ver, fill, fill, fill, ver),
+            (ver, fill, text, fill, ver),
+            (ver, fill, fill, fill, ver),
+            (ver, fill, fill, fill, ver),
+            (bot_left, hor, hor, hor, bot_right),
+        ],
+    )

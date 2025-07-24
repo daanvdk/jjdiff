@@ -101,6 +101,31 @@ class TextStyle:
         else:
             return ""
 
+    def update(
+        self,
+        bold: bool | None = None,
+        italic: bool | None = None,
+        underline: bool | None = None,
+        fg: TextColor | None = None,
+        bg: TextColor | None = None,
+    ) -> "TextStyle":
+        if bold is None:
+            bold = self.bold
+
+        if italic is None:
+            italic = self.italic
+
+        if underline is None:
+            underline = self.underline
+
+        if fg is None:
+            fg = self.fg
+
+        if bg is None:
+            bg = self.bg
+
+        return TextStyle(bold, italic, underline, fg, bg)
+
 
 DEFAULT_TEXT_STYLE = TextStyle()
 
@@ -183,6 +208,11 @@ class Text(Drawable):
 
         for span in self.spans:
             index = 0
+
+            if len(span.content) == 0:
+                line.append(span.style.style_code)
+                line.append(span.content)
+                line.append(span.style.reset_code)
 
             while index < len(span.content):
                 max_len = width - x
