@@ -22,7 +22,3 @@ def main() -> None:
     changes = list(diff(old, new))
     apply_changes(new, reverse_changes(changes))
     apply_changes(new, edit_changes(changes))
-
-    import sys
-
-    sys.exit(1)
