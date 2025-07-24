@@ -48,6 +48,7 @@ def reverse_changes(changes: Sequence[Change]) -> Iterator[Change]:
 
 
 def reverse_change(change: Change) -> Change:
+    reverse_status: ChangeStatus
     match change.status:
         case "added":
             reverse_status = "deleted"

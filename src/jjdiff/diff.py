@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from difflib import Differ, SequenceMatcher
+from difflib import Differ
 from pathlib import Path
 from typing import Literal, cast
 

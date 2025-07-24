@@ -2,11 +2,11 @@ from jjdiff.diff import diff_lines
 
 
 def test_diff_lines_empty():
-    assert diff_lines([], []) == []
+    assert diff_lines("", "") == []
 
 
 def test_diff_lines_only_add():
-    line1, line2 = diff_lines([], ["foo", "bar"])
+    line1, line2 = diff_lines("", "foo\nbar")
 
     assert line1.status == "added"
     assert line1.old is None
@@ -18,7 +18,7 @@ def test_diff_lines_only_add():
 
 
 def test_diff_lines_only_delete():
-    line1, line2 = diff_lines(["foo", "bar"], [])
+    line1, line2 = diff_lines("foo\nbar", "")
 
     assert line1.status == "deleted"
     assert line1.old == "foo"
@@ -30,7 +30,7 @@ def test_diff_lines_only_delete():
 
 
 def test_diff_lines_changed():
-    line1, line2 = diff_lines(["foo", "bar"], ["foo", "baz"])
+    line1, line2 = diff_lines("foo\nbar", "foo\nbaz")
 
     assert line1.status == "unchanged"
     assert line1.old == "foo"

@@ -246,6 +246,67 @@ class Editor:
         self.include_dependencies.setdefault(dependant, set()).add(dependency)
         self.include_dependants.setdefault(dependency, set()).add(dependant)
 
+    def get_cursor_range(self, width: int) -> tuple[int, int]:
+        # Add all changes up to the cursor to get the start line
+        changes: list[Change] = []
+
+        match self.cursor:
+            case ChangeCursor(change):
+                changes.extend(self.changes[:change])
+
+            case HunkCursor(change, start, _end):
+                changes.extend(self.changes[:change])
+                selected_change = self.changes[change]
+                assert selected_change.lines is not None
+                changes.append(
+                    Change(
+                        selected_change.path,
+                        selected_change.status,
+                        selected_change.lines[:start],
+                    )
+                )
+
+            case LineCursor(change, line):
+                changes.extend(self.changes[:change])
+                selected_change = self.changes[change]
+                assert selected_change.lines is not None
+                changes.append(
+                    Change(
+                        selected_change.path,
+                        selected_change.status,
+                        selected_change.lines[:line],
+                    )
+                )
+
+        cursor_start = render_changes(changes, self.cursor, self.includes).height(width)
+
+        # Add all changes in the cursor to get the end line
+        match self.cursor:
+            case ChangeCursor(change):
+                changes.append(self.changes[change])
+
+            case HunkCursor(change, start, end):
+                selected_change = self.changes[change]
+                assert selected_change.lines is not None
+
+                partial_change = changes[-1]
+                assert partial_change.lines is not None
+
+                partial_change.lines.extend(selected_change.lines[start:end])
+
+            case LineCursor(change, line):
+                selected_change = self.changes[change]
+                assert selected_change.lines is not None
+
+                partial_change = changes[-1]
+                assert partial_change.lines is not None
+
+                partial_change.lines.append(selected_change.lines[line])
+
+        cursor_end = render_changes(changes, self.cursor, self.includes).height(width)
+
+        return cursor_start, cursor_end
+
     def draw(self) -> None:
         render = self.should_render
 
@@ -259,72 +320,12 @@ class Editor:
             self.lines = list(self.drawable.render(width - 1))
             self.width = width
 
-            # Add all changes up to the cursor to get the start line
-            changes: list[Change] = []
-
-            match self.cursor:
-                case ChangeCursor(change):
-                    changes.extend(self.changes[:change])
-
-                case HunkCursor(change, start, _end):
-                    changes.extend(self.changes[:change])
-                    selected_change = self.changes[change]
-                    assert selected_change.lines is not None
-                    changes.append(
-                        Change(
-                            selected_change.path,
-                            selected_change.status,
-                            selected_change.lines[:start],
-                        )
-                    )
-
-                case LineCursor(change, line):
-                    changes.extend(self.changes[:change])
-                    selected_change = self.changes[change]
-                    assert selected_change.lines is not None
-                    changes.append(
-                        Change(
-                            selected_change.path,
-                            selected_change.status,
-                            selected_change.lines[:line],
-                        )
-                    )
-
-            cursor_start = render_changes(changes, self.cursor, self.includes).height(
-                width
-            )
-
-            # Add all changes in the cursor to get the end line
-            match self.cursor:
-                case ChangeCursor(change):
-                    changes.append(self.changes[change])
-
-                case HunkCursor(change, start, end):
-                    selected_change = self.changes[change]
-                    assert selected_change.lines is not None
-
-                    partial_change = changes[-1]
-                    assert partial_change.lines is not None
-
-                    partial_change.lines.extend(selected_change.lines[start:end])
-
-                case LineCursor(change, line):
-                    selected_change = self.changes[change]
-                    assert selected_change.lines is not None
-
-                    partial_change = changes[-1]
-                    assert partial_change.lines is not None
-
-                    partial_change.lines.append(selected_change.lines[line])
-
-            cursor_end = render_changes(changes, self.cursor, self.includes).height(
-                width
-            )
+            start, end = self.get_cursor_range(width)
 
             # Base the y on this
             self.y = min(
-                max(self.y, cursor_end + EDGE_PADDING - self.height),
-                cursor_start - EDGE_PADDING,
+                max(self.y, end + EDGE_PADDING - self.height),
+                start - EDGE_PADDING,
             )
             self.y = min(max(self.y, 0), len(self.lines) - self.height)
 
@@ -831,10 +832,12 @@ def render_change_lines(
             selected = cursor.is_line_selected(change_index, line_index)
             included = LineInclude(change_index, line_index) in includes
 
-            rows.append((
-                *render_line(old_line, line.status, line.old, selected, included),
-                *render_line(new_line, line.status, line.new, selected, included),
-            ))
+            rows.append(
+                (
+                    *render_line(old_line, line.status, line.old, selected, included),
+                    *render_line(new_line, line.status, line.new, selected, included),
+                )
+            )
 
             if line.old is not None:
                 old_line += 1
@@ -863,18 +866,24 @@ def render_change_title(change: Change, selected: bool, included: bool) -> Drawa
         assert not included
         status_text = Text(f"\u258c  {change.status} ", TextStyle(fg=fg, bg=bg))
     elif included:
-        status_text = Text.join([
-            Text(f" \u2713 {change.status}", TextStyle(fg="black", bg=fg, bold=True)),
-            Text("\u258c", TextStyle(fg=fg, bg=bg)),
-        ])
+        status_text = Text.join(
+            [
+                Text(
+                    f" \u2713 {change.status}", TextStyle(fg="black", bg=fg, bold=True)
+                ),
+                Text("\u258c", TextStyle(fg=fg, bg=bg)),
+            ]
+        )
     else:
         status_text = Text(f"\u258c\u2717 {change.status} ", TextStyle(fg=fg, bg=bg))
 
-    return Text.join([
-        status_text,
-        Text(f"{change.type} ", TextStyle(bg=bg, bold=included)),
-        Text(str(change.path), TextStyle(fg="blue", bg=bg, bold=included)),
-    ])
+    return Text.join(
+        [
+            status_text,
+            Text(f"{change.type} ", TextStyle(bg=bg, bold=included)),
+            Text(str(change.path), TextStyle(fg="blue", bg=bg, bold=included)),
+        ]
+    )
 
 
 def render_omitted(lines: int, selected: bool) -> Drawable:
@@ -908,6 +917,9 @@ def render_line(
     selected: bool,
     included: bool,
 ) -> tuple[Drawable, Drawable]:
+    gutter: Drawable
+    drawable: Drawable
+
     if content is None:
         fg = SELECTED_FG[selected]
         bg = SELECTED_BG[selected]
@@ -926,10 +938,12 @@ def render_line(
         fg = STATUS_COLOR[status]
         bg = SELECTED_BG[selected]
 
-        gutter = Text.join([
-            Text(f" \u2713{line:>4}", TextStyle(fg="black", bg=fg, bold=True)),
-            Text("\u258c", TextStyle(fg=fg, bg=bg)),
-        ])
+        gutter = Text.join(
+            [
+                Text(f" \u2713{line:>4}", TextStyle(fg="black", bg=fg, bold=True)),
+                Text("\u258c", TextStyle(fg=fg, bg=bg)),
+            ]
+        )
         drawable = Text(content, TextStyle(fg=fg, bg=bg, bold=True, italic=True))
 
     else:
