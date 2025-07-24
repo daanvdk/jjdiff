@@ -19,6 +19,6 @@ def main() -> None:
 
     new.joinpath("JJ-INSTRUCTIONS").unlink()
 
-    changes = list(diff(old, new))
+    changes = tuple(diff(old, new))
     apply_changes(new, reverse_changes(changes))
     apply_changes(new, edit_changes(changes))
