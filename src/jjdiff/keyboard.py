@@ -26,6 +26,7 @@ add_key(b"\x1b[A", "up")
 add_key(b"\x1b[B", "down")
 add_key(b"\x1b[C", "right")
 add_key(b"\x1b[D", "left")
+add_key(b"\r", "enter")
 
 
 def get_char() -> int:

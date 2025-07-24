@@ -375,6 +375,8 @@ class Editor:
                 self.undo()
             case "U":
                 self.redo()
+            case "enter":
+                self.commit()
             case _:
                 raise Exception(f"unknown key: {key!r}")
 
@@ -622,6 +624,46 @@ class Editor:
         action.apply(self)
         self.cursor = cursor
         self.rerender()
+
+    def commit(self) -> None:
+        self.result = []
+
+        for change_index, change in enumerate(self.changes):
+            change_include = ChangeInclude(change_index)
+
+            lines: list[Line] | None
+            line_changes = False
+
+            if change.lines is None:
+                lines = None
+            else:
+                lines = []
+
+                for line_index, line in enumerate(change.lines):
+                    line_include = LineInclude(change_index, line_index)
+
+                    if line_include in self.includes:
+                        lines.append(line)
+                        line_changes = True
+                    elif line.old is not None:
+                        lines.append(Line(line.old, line.old))
+
+            match change.status:
+                case "added":
+                    if change_include in self.includes:
+                        self.result.append(Change(change.path, "added", lines))
+
+                case "changed":
+                    if line_changes:
+                        self.result.append(Change(change.path, "changed", lines))
+
+                case "deleted":
+                    if change_include in self.includes:
+                        self.result.append(Change(change.path, "deleted", lines))
+                    elif line_changes:
+                        self.result.append(Change(change.path, "changed", lines))
+
+        self.exit()
 
     def apply_action(self, action: Action) -> None:
         self.redo_stack.clear()
