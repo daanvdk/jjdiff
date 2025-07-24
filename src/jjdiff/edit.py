@@ -30,6 +30,12 @@ SELECTED_BG: Mapping[bool, TextColor | None] = {
     True: "bright black",
     False: None,
 }
+BLOCK: Mapping[tuple[bool, bool], str] = {
+    (False, False): " ",
+    (False, True): "\u2584",
+    (True, False): "\u2580",
+    (True, True): "\u2588",
+}
 
 
 class Editor:
@@ -39,6 +45,12 @@ class Editor:
     is_reading: bool
     result: list[Change] | None
 
+    drawable: Drawable
+    width: int
+    height: int
+    y: int
+    lines: list[str]
+
     def __init__(self, changes: list[Change]):
         self.changes = changes
         self.should_draw = True
@@ -46,28 +58,58 @@ class Editor:
         self.is_reading = False
         self.result = None
 
-    def draw(self) -> None:
         drawables: list[Drawable] = []
-
         for change in self.changes:
             if drawables:
                 drawables.append(Text())
             drawables.append(render_change(change))
+        self.drawable = Rows(drawables)
 
-        drawable = Rows(drawables)
+        self.width = 0
+        self.height = 0
+        self.y = 0
+        self.lines = []
 
-        width, height = os.get_terminal_size()
+    def draw(self) -> None:
+        width, self.height = os.get_terminal_size()
+
+        if width != self.width:
+            self.lines = list(self.drawable.render(width - 1))
+            self.width = width
+
+        self.y = min(max(self.y, 0), len(self.lines) - self.height)
+
         sys.stdout.write("\x1b[2J\x1b[H")
-        drawable.draw(width, height)
+        for line in self.lines[self.y : self.y + self.height]:
+            sys.stdout.write(line)
+            sys.stdout.write("\x1b[1E")
+        self.draw_scrollbar()
         sys.stdout.flush()
+
+    def draw_scrollbar(self) -> None:
+        blocks = self.height * 2
+        start = round(self.y / len(self.lines) * blocks)
+        end = round((self.y + self.height) / len(self.lines) * blocks)
+
+        sys.stdout.write(f"\x1b[H\x1b[{self.width - 1}C")
+        for i in range(0, blocks, 2):
+            style = TextStyle(fg="bright black")
+            block = BLOCK[start <= i < end, start <= i + 1 < end]
+            sys.stdout.write(f"{style.style_code}{block}{style.reset_code}")
+            sys.stdout.write("\x1b[1B")
 
     def handle_key(self, key: str) -> None:
         match key:
             case "ctrl+c" | "ctrl+d" | "escape":
                 self.should_exit = True
 
-            case _:
-                pass
+            case "up":
+                self.y = max(self.y - 1, 0)
+                self.should_draw = True
+
+            case "down":
+                self.y = min(self.y + 1, len(self.lines) - self.height)
+                self.should_draw = True
 
     def on_resize(self, _signal: int, _frame: FrameType | None) -> None:
         self.should_draw = True
