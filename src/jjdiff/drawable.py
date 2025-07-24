@@ -10,3 +10,9 @@ class Drawable(ABC):
     @abstractmethod
     def render(self, width: int) -> Iterator[str]:
         raise NotImplementedError
+
+    def height(self, width: int) -> int:
+        height = 0
+        for _ in self.render(width):
+            height += 1
+        return height
