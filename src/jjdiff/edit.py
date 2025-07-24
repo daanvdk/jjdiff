@@ -1,12 +1,15 @@
+from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass
 import os
+from pathlib import Path
 import signal
 import sys
 import termios
 import tty
 from types import FrameType
+from typing import override
 
 from .keyboard import Keyboard
 from .change import Change, Line, LineStatus
@@ -47,14 +50,14 @@ class ChangeCursor:
     def is_change_selected(self, change: int) -> bool:
         return self.change == change
 
-    def is_title_selected(self) -> bool:
-        return True
+    def is_title_selected(self, change: int) -> bool:
+        return self.change == change
 
-    def is_line_selected(self, _line: int) -> bool:
-        return True
+    def is_line_selected(self, change: int, _line: int) -> bool:
+        return self.change == change
 
-    def is_all_lines_selected(self) -> bool:
-        return True
+    def is_all_lines_selected(self, change: int) -> bool:
+        return self.change == change
 
 
 @dataclass
@@ -66,13 +69,13 @@ class HunkCursor:
     def is_change_selected(self, change: int) -> bool:
         return self.change == change
 
-    def is_title_selected(self) -> bool:
+    def is_title_selected(self, _change: int) -> bool:
         return False
 
-    def is_line_selected(self, line: int) -> bool:
-        return self.start <= line < self.end
+    def is_line_selected(self, change: int, line: int) -> bool:
+        return self.change == change and self.start <= line < self.end
 
-    def is_all_lines_selected(self) -> bool:
+    def is_all_lines_selected(self, _change: int) -> bool:
         return False
 
 
@@ -84,36 +87,79 @@ class LineCursor:
     def is_change_selected(self, change: int) -> bool:
         return self.change == change
 
-    def is_title_selected(self) -> bool:
+    def is_title_selected(self, _change: int) -> bool:
         return False
 
-    def is_line_selected(self, line: int) -> bool:
-        return self.line == line
+    def is_line_selected(self, change: int, line: int) -> bool:
+        return self.change == change and self.line == line
 
-    def is_all_lines_selected(self) -> bool:
-        return False
-
-
-@dataclass
-class NoCursor:
-    def is_change_selected(self, _change: int) -> bool:
-        return False
-
-    def is_title_selected(self) -> bool:
-        return False
-
-    def is_line_selected(self, _line: int) -> bool:
-        return False
-
-    def is_all_lines_selected(self) -> bool:
+    def is_all_lines_selected(self, _change: int) -> bool:
         return False
 
 
-type Cursor = ChangeCursor | HunkCursor | LineCursor | NoCursor
+type Cursor = ChangeCursor | HunkCursor | LineCursor
+
+
+@dataclass(frozen=True)
+class ChangeInclude:
+    change: int
+
+
+@dataclass(frozen=True)
+class LineInclude:
+    change: int
+    line: int
+
+
+type Include = ChangeInclude | LineInclude
+
+
+class Action(ABC):
+    @abstractmethod
+    def apply(self, editor: "Editor") -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def revert(self, editor: "Editor") -> None:
+        raise NotImplementedError
+
+
+class AddIncludes(Action):
+    includes: set[Include]
+
+    def __init__(self, includes: set[Include]):
+        self.includes = includes
+
+    @override
+    def apply(self, editor: "Editor") -> None:
+        editor.includes |= self.includes
+
+    @override
+    def revert(self, editor: "Editor") -> None:
+        editor.includes -= self.includes
+
+
+class RemoveIncludes(Action):
+    includes: set[Include]
+
+    def __init__(self, includes: set[Include]):
+        self.includes = includes
+
+    @override
+    def apply(self, editor: "Editor") -> None:
+        editor.includes -= self.includes
+
+    @override
+    def revert(self, editor: "Editor") -> None:
+        editor.includes |= self.includes
 
 
 class Editor:
     changes: list[Change]
+    includes: set[Include]
+    include_dependencies: dict[Include, set[Include]]
+    include_dependants: dict[Include, set[Include]]
+
     should_render: bool
     should_draw: bool
     should_exit: bool
@@ -127,48 +173,85 @@ class Editor:
     cursor: Cursor
     lines: list[str]
 
+    undo_stack: list[tuple[Action, Cursor]]
+    redo_stack: list[tuple[Action, Cursor]]
+
     def __init__(self, changes: list[Change]):
         self.changes = changes
+        self.includes = set()
+        self.include_dependencies = {}
+        self.include_dependants = {}
+
         self.should_render = True
         self.should_draw = True
         self.should_exit = False
         self.is_reading = False
         self.result = None
 
-        change = 0
-        while change < len(changes):
-            if changes[change].type != "file":
-                change += 1
-                continue
+        self.undo_stack = []
+        self.redo_stack = []
 
-            lines = changes[change].lines
-            assert lines is not None
+        added: dict[Path, Include] = {}
+        deleted: dict[Path, Include] = {}
 
-            start = 0
-            while lines[start].status == "unchanged":
-                start += 1
+        # Set dependencies
+        for change_index, change in enumerate(self.changes):
+            match change.status:
+                case "added":
+                    change_include = ChangeInclude(change_index)
 
-            end = start
-            while end < len(lines) and lines[end].status != "unchanged":
-                end += 1
+                    # For a file or directory to be added its predecessor must be removed
+                    if predecessor := deleted.pop(change.path, None):
+                        self.add_dependency(change_include, predecessor)
 
-            self.cursor = HunkCursor(change, start, end)
-            break
-        else:
-            self.cursor = ChangeCursor(0)
+                    # For a file or directory to be added its parent must be added
+                    if parent := added.get(change.path.parent):
+                        self.add_dependency(change_include, parent)
 
+                    # For a line to be added the file must be added
+                    for line_index, line in enumerate(change.lines or []):
+                        assert line.status == "added"
+                        line_include = LineInclude(change_index, line_index)
+                        self.add_dependency(line_include, change_include)
+
+                    added[change.path] = change_include
+
+                case "changed":
+                    pass
+
+                case "deleted":
+                    change_include = ChangeInclude(change_index)
+
+                    # For a directory to be deleted all its children must be deleted
+                    for child_path, child in deleted.items():
+                        if child_path.parent == change.path:
+                            self.add_dependency(change_include, child)
+
+                    # For a file to be deleted all lines must be deleted
+                    for line_index, line in enumerate(change.lines or []):
+                        assert line.status == "deleted"
+                        line_include = LineInclude(change_index, line_index)
+                        self.add_dependency(change_include, line_include)
+
+                    deleted[change.path] = change_include
+
+        self.cursor = ChangeCursor(0)
         self.drawable = Text("")
         self.width = 0
         self.height = 0
         self.y = 0
         self.lines = []
 
+    def add_dependency(self, dependant: Include, dependency: Include) -> None:
+        self.include_dependencies.setdefault(dependant, set()).add(dependency)
+        self.include_dependants.setdefault(dependency, set()).add(dependant)
+
     def draw(self) -> None:
         render = self.should_render
 
         if render:
             self.should_render = False
-            self.drawable = render_changes(self.changes, self.cursor)
+            self.drawable = render_changes(self.changes, self.cursor, self.includes)
 
         width, self.height = os.get_terminal_size()
 
@@ -207,10 +290,9 @@ class Editor:
                         )
                     )
 
-                case NoCursor():
-                    pass
-
-            cursor_start = render_changes(changes, self.cursor).height(width)
+            cursor_start = render_changes(changes, self.cursor, self.includes).height(
+                width
+            )
 
             # Add all changes in the cursor to get the end line
             match self.cursor:
@@ -235,10 +317,9 @@ class Editor:
 
                     partial_change.lines.append(selected_change.lines[line])
 
-                case NoCursor():
-                    pass
-
-            cursor_end = render_changes(changes, self.cursor).height(width)
+            cursor_end = render_changes(changes, self.cursor, self.includes).height(
+                width
+            )
 
             # Base the y on this
             self.y = min(
@@ -280,190 +361,272 @@ class Editor:
         match key:
             case "ctrl+c" | "ctrl+d" | "escape":
                 self.exit()
+            case "h" | "left":
+                self.grow_cursor()
+            case "j" | "down":
+                self.next_cursor()
+            case "k" | "up":
+                self.prev_cursor()
+            case "l" | "right":
+                self.shrink_cursor()
+            case " ":
+                self.toggle_cursor()
+            case "u":
+                self.undo()
+            case "U":
+                self.redo()
+            case _:
+                raise Exception(f"unknown key: {key!r}")
 
-            case "h":
-                # grow cursor
-                match self.cursor:
-                    case ChangeCursor(_):
-                        pass
+    def prev_cursor(self) -> None:
+        match self.cursor:
+            case ChangeCursor(change):
+                self.cursor = ChangeCursor((change - 1) % len(self.changes))
+                self.rerender()
 
-                    case HunkCursor(change, _):
-                        self.cursor = ChangeCursor(change)
-                        self.rerender()
+            case HunkCursor(change, start, end):
+                while True:
+                    lines = self.changes[change].lines
+                    assert lines is not None
 
-                    case LineCursor(change, line):
-                        lines = self.changes[change].lines
-                        assert lines is not None
+                    end = start
 
-                        start = line
-                        while start > 0 and lines[start - 1].status != "unchanged":
-                            start -= 1
-
-                        end = line + 1
-                        while end < len(lines) and lines[end].status != "unchanged":
-                            end += 1
-
-                        self.cursor = HunkCursor(change, start, end)
-                        self.rerender()
-
-                    case NoCursor():
-                        pass
-
-            case "j":
-                # next cursor
-                match self.cursor:
-                    case ChangeCursor(change):
-                        self.cursor = ChangeCursor((change + 1) % len(self.changes))
-                        self.rerender()
-
-                    case HunkCursor(change, start, end):
-                        while True:
-                            lines = self.changes[change].lines
-                            assert lines is not None
-
-                            start = end
-
-                            while start < len(lines):
-                                if lines[start].status != "unchanged":
-                                    break
-                                start += 1
-                            else:
-                                while True:
-                                    change = (change + 1) % len(self.changes)
-                                    if self.changes[change].lines is not None:
-                                        break
-
-                                start = 0
-                                end = 0
-                                continue
-
-                            end = start + 1
-                            while end < len(lines) and lines[end].status != "unchanged":
-                                end += 1
-
-                            self.cursor = HunkCursor(change, start, end)
-                            self.rerender()
+                    while end > 0:
+                        if lines[end - 1].status != "unchanged":
                             break
-
-                    case LineCursor(change, line):
-                        line += 1
-
+                        end -= 1
+                    else:
                         while True:
+                            change = (change - 1) % len(self.changes)
                             lines = self.changes[change].lines
-                            assert lines is not None
+                            if lines is not None:
+                                break
 
-                            while line < len(lines):
-                                if lines[line].status != "unchanged":
-                                    break
-                                line += 1
-                            else:
-                                while True:
-                                    change = (change + 1) % len(self.changes)
-                                    if self.changes[change].lines is not None:
-                                        break
+                        start = len(lines)
+                        end = len(lines)
+                        continue
 
-                                line = 0
-                                continue
+                    start = end - 1
+                    while start > 0 and lines[start - 1].status != "unchanged":
+                        start -= 1
 
-                            self.cursor = LineCursor(change, line)
-                            self.rerender()
+                    self.cursor = HunkCursor(change, start, end)
+                    self.rerender()
+                    break
+
+            case LineCursor(change, line):
+                line -= 1
+
+                while True:
+                    lines = self.changes[change].lines
+                    assert lines is not None
+
+                    while line > 0:
+                        if lines[line].status != "unchanged":
                             break
-
-                    case NoCursor():
-                        pass
-
-            case "k":
-                # prev cursor
-                match self.cursor:
-                    case ChangeCursor(change):
-                        self.cursor = ChangeCursor((change - 1) % len(self.changes))
-                        self.rerender()
-
-                    case HunkCursor(change, start, end):
-                        while True:
-                            lines = self.changes[change].lines
-                            assert lines is not None
-
-                            end = start
-
-                            while end > 0:
-                                if lines[end - 1].status != "unchanged":
-                                    break
-                                end -= 1
-                            else:
-                                while True:
-                                    change = (change - 1) % len(self.changes)
-                                    lines = self.changes[change].lines
-                                    if lines is not None:
-                                        break
-
-                                start = len(lines)
-                                end = len(lines)
-                                continue
-
-                            start = end - 1
-                            while start > 0 and lines[start - 1].status != "unchanged":
-                                start -= 1
-
-                            self.cursor = HunkCursor(change, start, end)
-                            self.rerender()
-                            break
-
-                    case LineCursor(change, line):
                         line -= 1
-
+                    else:
                         while True:
+                            change = (change - 1) % len(self.changes)
                             lines = self.changes[change].lines
-                            assert lines is not None
+                            if lines is not None:
+                                break
 
-                            while line > 0:
-                                if lines[line].status != "unchanged":
-                                    break
-                                line -= 1
-                            else:
-                                while True:
-                                    change = (change - 1) % len(self.changes)
-                                    lines = self.changes[change].lines
-                                    if lines is not None:
-                                        break
+                        line = len(lines) - 1
+                        continue
 
-                                line = len(lines) - 1
-                                continue
+                    self.cursor = LineCursor(change, line)
+                    self.rerender()
+                    break
 
-                            self.cursor = LineCursor(change, line)
-                            self.rerender()
+    def next_cursor(self) -> None:
+        match self.cursor:
+            case ChangeCursor(change):
+                self.cursor = ChangeCursor((change + 1) % len(self.changes))
+                self.rerender()
+
+            case HunkCursor(change, start, end):
+                while True:
+                    lines = self.changes[change].lines
+                    assert lines is not None
+
+                    start = end
+
+                    while start < len(lines):
+                        if lines[start].status != "unchanged":
                             break
-
-                    case NoCursor():
-                        pass
-            case "l":
-                # shrink cursor
-                match self.cursor:
-                    case ChangeCursor(change):
-                        lines = self.changes[change].lines
-                        if lines is None:
-                            return
+                        start += 1
+                    else:
+                        while True:
+                            change = (change + 1) % len(self.changes)
+                            if self.changes[change].lines is not None:
+                                break
 
                         start = 0
-                        while lines[start].status == "unchanged":
-                            start += 1
+                        end = 0
+                        continue
 
-                        end = start + 1
-                        while end < len(lines) and lines[end].status != "unchanged":
-                            end += 1
+                    end = start + 1
+                    while end < len(lines) and lines[end].status != "unchanged":
+                        end += 1
 
-                        self.cursor = HunkCursor(change, start, end)
-                        self.rerender()
+                    self.cursor = HunkCursor(change, start, end)
+                    self.rerender()
+                    break
 
-                    case HunkCursor(change, start, _):
-                        self.cursor = LineCursor(change, start)
-                        self.rerender()
+            case LineCursor(change, line):
+                line += 1
 
-                    case LineCursor(change, line):
-                        pass
+                while True:
+                    lines = self.changes[change].lines
+                    assert lines is not None
 
-                    case NoCursor():
-                        pass
+                    while line < len(lines):
+                        if lines[line].status != "unchanged":
+                            break
+                        line += 1
+                    else:
+                        while True:
+                            change = (change + 1) % len(self.changes)
+                            if self.changes[change].lines is not None:
+                                break
+
+                        line = 0
+                        continue
+
+                    self.cursor = LineCursor(change, line)
+                    self.rerender()
+                    break
+
+    def grow_cursor(self) -> None:
+        match self.cursor:
+            case ChangeCursor(_change):
+                pass
+
+            case HunkCursor(change, _start, _end):
+                self.cursor = ChangeCursor(change)
+                self.rerender()
+
+            case LineCursor(change, line):
+                lines = self.changes[change].lines
+                assert lines is not None
+
+                start = line
+                while start > 0 and lines[start - 1].status != "unchanged":
+                    start -= 1
+
+                end = line + 1
+                while end < len(lines) and lines[end].status != "unchanged":
+                    end += 1
+
+                self.cursor = HunkCursor(change, start, end)
+                self.rerender()
+
+    def shrink_cursor(self) -> None:
+        match self.cursor:
+            case ChangeCursor(change):
+                lines = self.changes[change].lines
+                if lines is None:
+                    return
+
+                start = 0
+                while lines[start].status == "unchanged":
+                    start += 1
+
+                end = start + 1
+                while end < len(lines) and lines[end].status != "unchanged":
+                    end += 1
+
+                self.cursor = HunkCursor(change, start, end)
+                self.rerender()
+
+            case HunkCursor(change, start, _):
+                self.cursor = LineCursor(change, start)
+                self.rerender()
+
+            case LineCursor(_change, _line):
+                pass
+
+    def toggle_cursor(self) -> None:
+        includes: set[Include] = set()
+
+        match self.cursor:
+            case ChangeCursor(change):
+                if self.changes[change].status != "changed":
+                    includes.add(ChangeInclude(change))
+
+                lines = self.changes[change].lines
+                if lines is not None:
+                    for line in range(len(lines)):
+                        includes.add(LineInclude(change, line))
+
+            case HunkCursor(change, start, end):
+                for line in range(start, end):
+                    includes.add(LineInclude(change, line))
+
+            case LineCursor(change, line):
+                includes.add(LineInclude(change, line))
+
+        new_includes = includes - self.includes
+
+        if new_includes:
+            # Ensure we also include all dependencies
+            while dependencies := {
+                dependency
+                for include in new_includes
+                for dependency in self.include_dependencies.get(include, set())
+                if dependency not in new_includes
+            }:
+                new_includes.update(dependencies)
+
+            # Remove dependencies that were already in the includes
+            new_includes.difference_update(self.includes)
+
+            self.apply_action(AddIncludes(new_includes))
+        else:
+            # Ensure we also include all dependants
+            while dependants := {
+                dependant
+                for include in includes
+                for dependant in self.include_dependants.get(include, set())
+                if dependant not in includes
+            }:
+                includes.update(dependants)
+
+            # Remove dependencies that are not in the includes
+            includes.intersection_update(self.includes)
+
+            self.apply_action(RemoveIncludes(includes))
+
+        self.rerender()
+        self.next_cursor()
+
+    def undo(self) -> None:
+        try:
+            action, cursor = self.undo_stack.pop()
+        except IndexError:
+            return
+
+        self.redo_stack.append((action, self.cursor))
+        action.revert(self)
+        self.cursor = cursor
+        self.rerender()
+
+    def redo(self) -> None:
+        try:
+            action, cursor = self.redo_stack.pop()
+        except IndexError:
+            return
+
+        self.undo_stack.append((action, self.cursor))
+        action.apply(self)
+        self.cursor = cursor
+        self.rerender()
+
+    def apply_action(self, action: Action) -> None:
+        self.redo_stack.clear()
+        self.undo_stack.append((action, self.cursor))
+        action.apply(self)
 
     def on_resize(self, _signal: int, _frame: FrameType | None) -> None:
         self.should_draw = True
@@ -528,33 +691,54 @@ MIN_CONTEXT = 3
 MIN_OMITTED = 2
 
 
-def render_changes(changes: list[Change], cursor: Cursor) -> Drawable:
+def render_changes(
+    changes: list[Change],
+    cursor: Cursor,
+    includes: set[Include],
+) -> Drawable:
     drawables: list[Drawable] = []
 
     for i, change in enumerate(changes):
         if drawables:
             drawables.append(Text())
-
-        if cursor.is_change_selected(i):
-            change_cursor = cursor
-        else:
-            change_cursor = NoCursor()
-
-        drawables.append(render_change(change, change_cursor))
+        drawables.append(render_change(i, change, cursor, includes))
 
     return Rows(drawables)
 
 
-def render_change(change: Change, cursor: Cursor) -> Drawable:
-    drawables = [render_change_title(change, cursor.is_title_selected(), False)]
+def render_change(
+    change_index: int,
+    change: Change,
+    cursor: Cursor,
+    includes: set[Include],
+) -> Drawable:
+    drawables = [
+        render_change_title(
+            change,
+            cursor.is_title_selected(change_index),
+            ChangeInclude(change_index) in includes,
+        )
+    ]
 
     if change.lines is not None:
-        drawables.append(render_change_lines(change.lines, cursor))
+        drawables.append(
+            render_change_lines(
+                change_index,
+                change.lines,
+                cursor,
+                includes,
+            )
+        )
 
     return Rows(drawables)
 
 
-def render_change_lines(lines: list[Line], cursor: Cursor) -> Drawable:
+def render_change_lines(
+    change_index: int,
+    lines: list[Line],
+    cursor: Cursor,
+    includes: set[Include],
+) -> Drawable:
     drawables: list[Drawable] = []
     ranges: list[tuple[int, int]] = []
 
@@ -591,7 +775,10 @@ def render_change_lines(lines: list[Line], cursor: Cursor) -> Drawable:
                     new_line += 1
 
             drawables.append(
-                render_omitted(start - index, cursor.is_all_lines_selected())
+                render_omitted(
+                    start - index,
+                    cursor.is_all_lines_selected(change_index),
+                )
             )
         else:
             assert index == start, repr(ranges)
@@ -599,11 +786,12 @@ def render_change_lines(lines: list[Line], cursor: Cursor) -> Drawable:
         rows: list[tuple[Drawable, ...]] = []
 
         for line_index, line in enumerate(lines[start:end], start):
-            selected = cursor.is_line_selected(line_index)
+            selected = cursor.is_line_selected(change_index, line_index)
+            included = LineInclude(change_index, line_index) in includes
 
             rows.append((
-                *render_line(old_line, line.status, line.old, selected, False),
-                *render_line(new_line, line.status, line.new, selected, False),
+                *render_line(old_line, line.status, line.old, selected, included),
+                *render_line(new_line, line.status, line.new, selected, included),
             ))
 
             if line.old is not None:
@@ -616,20 +804,23 @@ def render_change_lines(lines: list[Line], cursor: Cursor) -> Drawable:
 
     if index < len(lines):
         drawables.append(
-            render_omitted(len(lines) - index, cursor.is_all_lines_selected())
+            render_omitted(
+                len(lines) - index,
+                cursor.is_all_lines_selected(change_index),
+            )
         )
 
     return Rows(drawables)
 
 
-def render_change_title(change: Change, selected: bool, toggled: bool) -> Drawable:
+def render_change_title(change: Change, selected: bool, included: bool) -> Drawable:
     fg = STATUS_COLOR[change.status]
     bg = SELECTED_BG[selected]
 
     if change.status == "changed":
-        assert not toggled
+        assert not included
         status_text = Text(f"\u258c  {change.status} ", TextStyle(fg=fg, bg=bg))
-    elif toggled:
+    elif included:
         status_text = Text.join([
             Text(f" \u2713 {change.status}", TextStyle(fg="black", bg=fg, bold=True)),
             Text("\u258c", TextStyle(fg=fg, bg=bg)),
@@ -639,8 +830,8 @@ def render_change_title(change: Change, selected: bool, toggled: bool) -> Drawab
 
     return Text.join([
         status_text,
-        Text(f"{change.type} ", TextStyle(bg=bg, bold=toggled)),
-        Text(str(change.path), TextStyle(fg="blue", bg=bg, bold=toggled)),
+        Text(f"{change.type} ", TextStyle(bg=bg, bold=included)),
+        Text(str(change.path), TextStyle(fg="blue", bg=bg, bold=included)),
     ])
 
 
@@ -673,7 +864,7 @@ def render_line(
     status: LineStatus,
     content: str | None,
     selected: bool,
-    toggled: bool,
+    included: bool,
 ) -> tuple[Drawable, Drawable]:
     if content is None:
         fg = SELECTED_FG[selected]
@@ -689,7 +880,7 @@ def render_line(
         gutter = Text(f"\u258f {line:>4} ", TextStyle(fg=fg, bg=bg))
         drawable = Text(content, TextStyle(bg=bg))
 
-    elif toggled:
+    elif included:
         fg = STATUS_COLOR[status]
         bg = SELECTED_BG[selected]
 
