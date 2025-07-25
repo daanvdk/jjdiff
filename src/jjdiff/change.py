@@ -164,29 +164,29 @@ def reverse_lines(lines: list[Line]) -> list[Line]:
 
 
 @dataclass(frozen=True)
-class ChangeInclude:
+class ChangeRef:
     change: int
 
 
 @dataclass(frozen=True)
-class LineInclude:
+class LineRef:
     change: int
     line: int
 
 
-type Include = ChangeInclude | LineInclude
+type Ref = ChangeRef | LineRef
 
 
 def filter_changes(
-    includes: set[Include],
+    refs: set[Ref],
     changes: Iterable[Change],
 ) -> Iterator[Change]:
     for change_index, change in enumerate(changes):
-        change_include = ChangeInclude(change_index)
+        change_ref = ChangeRef(change_index)
 
         # For non file changes we just include the whole change or not
         if not isinstance(change, FILE_CHANGE_TYPES):
-            if change_include in includes:
+            if change_ref in refs:
                 yield change
             continue
 
@@ -195,8 +195,8 @@ def filter_changes(
         line_changes = False
 
         for line_index, line in enumerate(change.lines):
-            line_include = LineInclude(change_index, line_index)
-            if line_include in includes:
+            line_ref = LineRef(change_index, line_index)
+            if line_ref in refs:
                 lines.append(line)
                 line_changes = True
             elif line.old is not None:
@@ -205,7 +205,7 @@ def filter_changes(
         # Now we can check what the filtered change looks like
         match change:
             case AddFile(path, _, is_exec):
-                if change_include in includes:
+                if change_ref in refs:
                     yield AddFile(path, lines, is_exec)
 
             case ModifyFile(path):
@@ -213,7 +213,7 @@ def filter_changes(
                     yield ModifyFile(path, lines)
 
             case DeleteFile(path, _, is_exec):
-                if change_include in includes:
+                if change_ref in refs:
                     yield DeleteFile(path, lines, is_exec)
                 elif line_changes:
                     yield ModifyFile(path, lines)
