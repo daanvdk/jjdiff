@@ -10,7 +10,7 @@ import sys
 import termios
 import tty
 from types import FrameType
-from typing import cast, override
+from typing import Literal, cast, override
 
 from .keyboard import Keyboard
 from .change import (
@@ -598,15 +598,7 @@ class Editor:
         match self.cursor:
             case ChangeCursor(change_index):
                 change = self.changes[change_index]
-
-                # For modify file the change itself does nothing, just the lines matter
-                if not isinstance(change, ModifyFile):
-                    refs.add(ChangeRef(change_index))
-
-                # For file changes we care about the lines
-                if isinstance(change, FILE_CHANGE_TYPES):
-                    for line_index in range(len(change.lines)):
-                        refs.add(LineRef(change_index, line_index))
+                refs.update(get_change_refs(change_index, change))
 
             case HunkCursor(change_index, start, end):
                 for line_index in range(start, end):
@@ -770,6 +762,24 @@ def render_changes(
     return Rows(drawables)
 
 
+def get_change_refs(change_index: int, change: Change) -> set[Ref]:
+    refs: set[Ref] = set()
+
+    # For modify file the change itself does nothing, just the lines matters
+    if not isinstance(change, ModifyFile):
+        refs.add(ChangeRef(change_index))
+
+    # For file changes we care about the lines
+    if isinstance(change, FILE_CHANGE_TYPES):
+        for line_index in range(len(change.lines)):
+            refs.add(LineRef(change_index, line_index))
+
+    return refs
+
+
+type ChangeIncluded = Literal["full", "partial", "none"]
+
+
 def render_change(
     change_index: int,
     change: Change,
@@ -778,10 +788,20 @@ def render_change(
     opened: bool,
     renames: dict[Path, Path],
 ) -> Drawable:
+    change_refs = get_change_refs(change_index, change)
+
+    change_included: ChangeIncluded
+    if not (change_refs - included):
+        change_included = "full"
+    elif change_refs & included:
+        change_included = "partial"
+    else:
+        change_included = "none"
+
     title = render_change_title(
         change,
         cursor.is_title_selected(change_index),
-        ChangeRef(change_index) in included,
+        change_included,
         renames,
     )
 
@@ -939,7 +959,7 @@ def render_change_lines(
 def render_change_title(
     change: Change,
     selected: bool,
-    included: bool,
+    included: ChangeIncluded,
     renames: dict[Path, Path],
 ) -> Drawable:
     fg: TextColor
@@ -1007,29 +1027,37 @@ def render_change_title(
     else:
         path = renames.get(path, path)
 
-    if isinstance(change, ModifyFile):
-        assert not included
-        action_text = Text(f"\u258c  {action} ", TextStyle(fg=fg, bg=bg))
-    elif included:
-        action_text = Text.join(
-            [
-                Text(f" \u2713 {action}", TextStyle(fg="black", bg=fg, bold=True)),
-                Text("\u258c", TextStyle(fg=fg, bg=bg)),
-            ]
-        )
-    else:
-        action_text = Text(f"\u258c\u2717 {action} ", TextStyle(fg=fg, bg=bg))
+    match included:
+        case "full":
+            action_text = Text.join(
+                [
+                    Text(f" \u2713 {action}", TextStyle(fg="black", bg=fg, bold=True)),
+                    Text("\u258c", TextStyle(fg=fg, bg=bg)),
+                ]
+            )
+        case "partial":
+            action_text = Text.join(
+                [
+                    Text(f" \u2212 {action}", TextStyle(fg="black", bg=fg, bold=True)),
+                    Text("\u258c", TextStyle(fg=fg, bg=bg)),
+                ]
+            )
+        case "none":
+            action_text = Text(f"\u258c\u2717 {action} ", TextStyle(fg=fg, bg=bg))
 
     texts = [
         action_text,
-        Text(f"{file_type} ", TextStyle(bg=bg, bold=included)),
-        Text(str(path), TextStyle(fg="blue", bg=bg, bold=included)),
+        Text(f"{file_type} ", TextStyle(bg=bg, bold=included != "none")),
+        Text(str(path), TextStyle(fg="blue", bg=bg, bold=included != "none")),
     ]
 
     if isinstance(change, Rename):
-        texts.append(Text(" to ", TextStyle(bg=bg, bold=included)))
+        texts.append(Text(" to ", TextStyle(bg=bg, bold=included != "none")))
         texts.append(
-            Text(str(change.new_path), TextStyle(fg="blue", bg=bg, bold=included))
+            Text(
+                str(change.new_path),
+                TextStyle(fg="blue", bg=bg, bold=included != "none"),
+            )
         )
 
     return Text.join(texts)
