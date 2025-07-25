@@ -164,9 +164,22 @@ class RemoveIncludes(Action):
 
 class Editor:
     changes: Sequence[Change]
+
     included: set[Ref]
     include_dependencies: dict[Ref, set[Ref]]
     include_dependants: dict[Ref, set[Ref]]
+
+    opened: set[ChangeRef]
+
+    undo_stack: list[tuple[Action, set[ChangeRef], Cursor]]
+    redo_stack: list[tuple[Action, set[ChangeRef], Cursor]]
+
+    drawable: Drawable
+    cursor: Cursor
+    width: int
+    height: int
+    y: int
+    lines: list[str]
 
     should_render: bool
     should_draw: bool
@@ -174,28 +187,21 @@ class Editor:
     is_reading: bool
     result: Iterator[Change] | None
 
-    drawable: Drawable
-    width: int
-    height: int
-    y: int
-    cursor: Cursor
-    lines: list[str]
-
-    undo_stack: list[tuple[Action, Cursor]]
-    redo_stack: list[tuple[Action, Cursor]]
-
     def __init__(self, changes: Sequence[Change]):
         self.changes = changes
+
+        self.included = set()
         self.include_dependencies = {}
         self.include_dependants = {}
         self.add_dependencies()
 
-        self.included = set()
+        self.opened = set()
+
         self.undo_stack = []
         self.redo_stack = []
 
-        self.cursor = ChangeCursor(0)
         self.drawable = Text("")
+        self.cursor = ChangeCursor(0)
         self.width = 0
         self.height = 0
         self.y = 0
@@ -277,7 +283,9 @@ class Editor:
                     case _:
                         pass  # never happens
 
-        cursor_start = render_changes(changes, self.cursor, self.included).height(width)
+        cursor_start = render_changes(
+            changes, self.cursor, self.included, self.opened
+        ).height(width)
 
         # Add all changes in the cursor to get the end line
         match self.cursor:
@@ -294,7 +302,9 @@ class Editor:
                 change_lines = cast(FileChange, self.changes[change]).lines
                 partial_lines.append(change_lines[line])
 
-        cursor_end = render_changes(changes, self.cursor, self.included).height(width)
+        cursor_end = render_changes(
+            changes, self.cursor, self.included, self.opened
+        ).height(width)
 
         return cursor_start, cursor_end
 
@@ -303,7 +313,9 @@ class Editor:
 
         if render:
             self.should_render = False
-            self.drawable = render_changes(self.changes, self.cursor, self.included)
+            self.drawable = render_changes(
+                self.changes, self.cursor, self.included, self.opened
+            )
 
         width, self.height = os.get_terminal_size()
 
@@ -353,24 +365,24 @@ class Editor:
         match key:
             case "ctrl+c" | "ctrl+d" | "escape":
                 self.exit()
-            case "h" | "left":
-                self.grow_cursor()
-            case "l" | "right":
-                self.shrink_cursor()
             case "k" | "up" | "shift+tab":
                 self.prev_cursor()
             case "j" | "down" | "tab":
                 self.next_cursor()
+            case "h" | "left":
+                self.grow_cursor()
+            case "l" | "right":
+                self.shrink_cursor()
             case " ":
-                self.toggle_cursor()
+                self.select_cursor()
+            case "enter":
+                self.confirm()
             case "u":
                 self.undo()
             case "U":
                 self.redo()
-            case "enter":
-                self.commit()
             case _:
-                raise Exception(f"unknown key: {key!r}")
+                pass
 
     def prev_cursor(self) -> None:
         match self.cursor:
@@ -394,7 +406,9 @@ class Editor:
                         while True:
                             change_index = (change_index - 1) % len(self.changes)
                             prev_change = self.changes[change_index]
-                            if isinstance(prev_change, FILE_CHANGE_TYPES):
+                            if ChangeRef(change_index) in self.opened and isinstance(
+                                prev_change, FILE_CHANGE_TYPES
+                            ):
                                 change = prev_change
                                 break
 
@@ -426,7 +440,9 @@ class Editor:
                         while True:
                             change_index = (change_index - 1) % len(self.changes)
                             prev_change = self.changes[change_index]
-                            if isinstance(prev_change, FILE_CHANGE_TYPES):
+                            if ChangeRef(change_index) in self.opened and isinstance(
+                                prev_change, FILE_CHANGE_TYPES
+                            ):
                                 change = prev_change
                                 break
 
@@ -459,7 +475,9 @@ class Editor:
                         while True:
                             change_index = (change_index + 1) % len(self.changes)
                             next_change = self.changes[change_index]
-                            if isinstance(next_change, FILE_CHANGE_TYPES):
+                            if ChangeRef(change_index) in self.opened and isinstance(
+                                next_change, FILE_CHANGE_TYPES
+                            ):
                                 change = next_change
                                 break
 
@@ -494,7 +512,9 @@ class Editor:
                         while True:
                             change_index = (change_index + 1) % len(self.changes)
                             next_change = self.changes[change_index]
-                            if isinstance(next_change, FILE_CHANGE_TYPES):
+                            if ChangeRef(change_index) in self.opened and isinstance(
+                                next_change, FILE_CHANGE_TYPES
+                            ):
                                 change = next_change
                                 break
 
@@ -507,8 +527,12 @@ class Editor:
 
     def grow_cursor(self) -> None:
         match self.cursor:
-            case ChangeCursor():
-                pass
+            case ChangeCursor(change_index):
+                change_ref = ChangeRef(change_index)
+
+                if change_ref in self.opened:
+                    self.opened.remove(change_ref)
+                    self.rerender()
 
             case HunkCursor(change_index):
                 self.cursor = ChangeCursor(change_index)
@@ -535,6 +559,13 @@ class Editor:
     def shrink_cursor(self) -> None:
         match self.cursor:
             case ChangeCursor(change_index):
+                change_ref = ChangeRef(change_index)
+
+                if change_ref not in self.opened:
+                    self.opened.add(change_ref)
+                    self.rerender()
+                    return
+
                 change = self.changes[change_index]
                 if not isinstance(change, FILE_CHANGE_TYPES):
                     return
@@ -561,7 +592,7 @@ class Editor:
             case LineCursor():
                 pass
 
-    def toggle_cursor(self) -> None:
+    def select_cursor(self) -> None:
         refs: set[Ref] = set()
 
         match self.cursor:
@@ -620,33 +651,35 @@ class Editor:
 
     def undo(self) -> None:
         try:
-            action, cursor = self.undo_stack.pop()
+            action, opened, cursor = self.undo_stack.pop()
         except IndexError:
             return
 
-        self.redo_stack.append((action, self.cursor))
+        self.redo_stack.append((action, self.opened, self.cursor))
         action.revert(self)
+        self.opened = opened
         self.cursor = cursor
         self.rerender()
 
     def redo(self) -> None:
         try:
-            action, cursor = self.redo_stack.pop()
+            action, opened, cursor = self.redo_stack.pop()
         except IndexError:
             return
 
-        self.undo_stack.append((action, self.cursor))
+        self.undo_stack.append((action, self.opened, self.cursor))
         action.apply(self)
+        self.opened = opened
         self.cursor = cursor
         self.rerender()
 
-    def commit(self) -> None:
+    def confirm(self) -> None:
         self.result = filter_changes(self.included, self.changes)
         self.exit()
 
     def apply_action(self, action: Action) -> None:
         self.redo_stack.clear()
-        self.undo_stack.append((action, self.cursor))
+        self.undo_stack.append((action, self.opened.copy(), self.cursor))
         action.apply(self)
 
     def on_resize(self, _signal: int, _frame: FrameType | None) -> None:
@@ -719,14 +752,20 @@ def render_changes(
     changes: Sequence[Change],
     cursor: Cursor,
     included: set[Ref],
+    opened: set[ChangeRef],
 ) -> Drawable:
     drawables: list[Drawable] = []
     renames: dict[Path, Path] = {}
 
     for i, change in enumerate(changes):
-        if drawables:
+        change_opened = ChangeRef(i) in opened
+
+        drawables.append(
+            render_change(i, change, cursor, included, change_opened, renames)
+        )
+
+        if change_opened:
             drawables.append(Text())
-        drawables.append(render_change(i, change, cursor, included, renames))
 
     return Rows(drawables)
 
@@ -736,16 +775,20 @@ def render_change(
     change: Change,
     cursor: Cursor,
     included: set[Ref],
+    opened: bool,
     renames: dict[Path, Path],
 ) -> Drawable:
-    drawables = [
-        render_change_title(
-            change,
-            cursor.is_title_selected(change_index),
-            ChangeRef(change_index) in included,
-            renames,
-        )
-    ]
+    title = render_change_title(
+        change,
+        cursor.is_title_selected(change_index),
+        ChangeRef(change_index) in included,
+        renames,
+    )
+
+    if not opened:
+        return title
+
+    drawables = [title]
 
     match change:
         case Rename() | ChangeMode():
