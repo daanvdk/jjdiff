@@ -19,15 +19,15 @@ from .change import (
     AddFile,
     AddSymlink,
     Change,
-    ChangeInclude,
+    ChangeRef,
     ChangeMode,
     DeleteBinary,
     DeleteFile,
     DeleteSymlink,
     FileChange,
-    Include,
+    Ref,
     Line,
-    LineInclude,
+    LineRef,
     LineStatus,
     ModifyBinary,
     ModifyFile,
@@ -133,40 +133,40 @@ class Action(ABC):
 
 
 class AddIncludes(Action):
-    includes: set[Include]
+    refs: set[Ref]
 
-    def __init__(self, includes: set[Include]):
-        self.includes = includes
+    def __init__(self, refs: set[Ref]):
+        self.refs = refs
 
     @override
     def apply(self, editor: "Editor") -> None:
-        editor.includes |= self.includes
+        editor.included |= self.refs
 
     @override
     def revert(self, editor: "Editor") -> None:
-        editor.includes -= self.includes
+        editor.included -= self.refs
 
 
 class RemoveIncludes(Action):
-    includes: set[Include]
+    refs: set[Ref]
 
-    def __init__(self, includes: set[Include]):
-        self.includes = includes
+    def __init__(self, refs: set[Ref]):
+        self.refs = refs
 
     @override
     def apply(self, editor: "Editor") -> None:
-        editor.includes -= self.includes
+        editor.included -= self.refs
 
     @override
     def revert(self, editor: "Editor") -> None:
-        editor.includes |= self.includes
+        editor.included |= self.refs
 
 
 class Editor:
     changes: Sequence[Change]
-    includes: set[Include]
-    include_dependencies: dict[Include, set[Include]]
-    include_dependants: dict[Include, set[Include]]
+    included: set[Ref]
+    include_dependencies: dict[Ref, set[Ref]]
+    include_dependants: dict[Ref, set[Ref]]
 
     should_render: bool
     should_draw: bool
@@ -190,7 +190,7 @@ class Editor:
         self.include_dependants = {}
         self.add_dependencies()
 
-        self.includes = set()
+        self.included = set()
         self.undo_stack = []
         self.redo_stack = []
 
@@ -213,12 +213,12 @@ class Editor:
 
     def add_delete_add_dependencies(self) -> None:
         # Add dependencies between deletes and adds on the same path
-        deleted: dict[Path, Include] = {}
+        deleted: dict[Path, Ref] = {}
 
         for change_index, change in enumerate(self.changes):
             match change:
                 case DeleteFile(path) | DeleteBinary(path) | DeleteSymlink(path):
-                    deleted[path] = ChangeInclude(change_index)
+                    deleted[path] = ChangeRef(change_index)
 
                 case AddFile(path) | AddBinary(path) | AddSymlink(path):
                     try:
@@ -226,7 +226,7 @@ class Editor:
                     except KeyError:
                         pass
                     else:
-                        dependant = ChangeInclude(change_index)
+                        dependant = ChangeRef(change_index)
                         self.add_dependency(dependant, dependency)
 
                 case _:
@@ -238,22 +238,22 @@ class Editor:
             match change:
                 case AddFile(_, lines):
                     # All lines in an added file depend on the file being added
-                    change_include = ChangeInclude(change_index)
+                    change_ref = ChangeRef(change_index)
                     for line_index in range(len(lines)):
-                        line_include = LineInclude(change_index, line_index)
-                        self.add_dependency(line_include, change_include)
+                        line_ref = LineRef(change_index, line_index)
+                        self.add_dependency(line_ref, change_ref)
 
                 case DeleteFile(_, lines):
                     # A deleted file depends on all lines being deleted
-                    change_include = ChangeInclude(change_index)
+                    change_ref = ChangeRef(change_index)
                     for line_index in range(len(lines)):
-                        line_include = LineInclude(change_index, line_index)
-                        self.add_dependency(change_include, line_include)
+                        line_ref = LineRef(change_index, line_index)
+                        self.add_dependency(change_ref, line_ref)
 
                 case _:
                     pass
 
-    def add_dependency(self, dependant: Include, dependency: Include) -> None:
+    def add_dependency(self, dependant: Ref, dependency: Ref) -> None:
         self.include_dependencies.setdefault(dependant, set()).add(dependency)
         self.include_dependants.setdefault(dependency, set()).add(dependant)
 
@@ -277,7 +277,7 @@ class Editor:
                     case _:
                         pass  # never happens
 
-        cursor_start = render_changes(changes, self.cursor, self.includes).height(width)
+        cursor_start = render_changes(changes, self.cursor, self.included).height(width)
 
         # Add all changes in the cursor to get the end line
         match self.cursor:
@@ -294,7 +294,7 @@ class Editor:
                 change_lines = cast(FileChange, self.changes[change]).lines
                 partial_lines.append(change_lines[line])
 
-        cursor_end = render_changes(changes, self.cursor, self.includes).height(width)
+        cursor_end = render_changes(changes, self.cursor, self.included).height(width)
 
         return cursor_start, cursor_end
 
@@ -303,7 +303,7 @@ class Editor:
 
         if render:
             self.should_render = False
-            self.drawable = render_changes(self.changes, self.cursor, self.includes)
+            self.drawable = render_changes(self.changes, self.cursor, self.included)
 
         width, self.height = os.get_terminal_size()
 
@@ -562,7 +562,7 @@ class Editor:
                 pass
 
     def toggle_cursor(self) -> None:
-        includes: set[Include] = set()
+        refs: set[Ref] = set()
 
         match self.cursor:
             case ChangeCursor(change_index):
@@ -570,50 +570,50 @@ class Editor:
 
                 # For modify file the change itself does nothing, just the lines matter
                 if not isinstance(change, ModifyFile):
-                    includes.add(ChangeInclude(change_index))
+                    refs.add(ChangeRef(change_index))
 
                 # For file changes we care about the lines
                 if isinstance(change, FILE_CHANGE_TYPES):
                     for line_index in range(len(change.lines)):
-                        includes.add(LineInclude(change_index, line_index))
+                        refs.add(LineRef(change_index, line_index))
 
             case HunkCursor(change_index, start, end):
                 for line_index in range(start, end):
-                    includes.add(LineInclude(change_index, line_index))
+                    refs.add(LineRef(change_index, line_index))
 
             case LineCursor(change_index, line_index):
-                includes.add(LineInclude(change_index, line_index))
+                refs.add(LineRef(change_index, line_index))
 
-        new_includes = includes - self.includes
+        new_refs = refs - self.included
 
-        if new_includes:
+        if new_refs:
             # Ensure we also include all dependencies
             while dependencies := {
                 dependency
-                for include in new_includes
-                for dependency in self.include_dependencies.get(include, set())
-                if dependency not in new_includes
+                for dependant in refs
+                for dependency in self.include_dependencies.get(dependant, set())
+                if dependency not in new_refs
             }:
-                new_includes.update(dependencies)
+                new_refs.update(dependencies)
 
-            # Remove dependencies that were already in the includes
-            new_includes.difference_update(self.includes)
+            # Remove dependencies that were already included
+            new_refs.difference_update(self.included)
 
-            self.apply_action(AddIncludes(new_includes))
+            self.apply_action(AddIncludes(new_refs))
         else:
             # Ensure we also include all dependants
             while dependants := {
                 dependant
-                for include in includes
-                for dependant in self.include_dependants.get(include, set())
-                if dependant not in includes
+                for dependency in refs
+                for dependant in self.include_dependants.get(dependency, set())
+                if dependant not in refs
             }:
-                includes.update(dependants)
+                refs.update(dependants)
 
-            # Remove dependencies that are not in the includes
-            includes.intersection_update(self.includes)
+            # Remove dependencies that are not included
+            refs.intersection_update(self.included)
 
-            self.apply_action(RemoveIncludes(includes))
+            self.apply_action(RemoveIncludes(refs))
 
         self.rerender()
         self.next_cursor()
@@ -641,7 +641,7 @@ class Editor:
         self.rerender()
 
     def commit(self) -> None:
-        self.result = filter_changes(self.includes, self.changes)
+        self.result = filter_changes(self.included, self.changes)
         self.exit()
 
     def apply_action(self, action: Action) -> None:
@@ -718,7 +718,7 @@ MIN_OMITTED = 2
 def render_changes(
     changes: Sequence[Change],
     cursor: Cursor,
-    includes: set[Include],
+    included: set[Ref],
 ) -> Drawable:
     drawables: list[Drawable] = []
     renames: dict[Path, Path] = {}
@@ -726,7 +726,7 @@ def render_changes(
     for i, change in enumerate(changes):
         if drawables:
             drawables.append(Text())
-        drawables.append(render_change(i, change, cursor, includes, renames))
+        drawables.append(render_change(i, change, cursor, included, renames))
 
     return Rows(drawables)
 
@@ -735,14 +735,14 @@ def render_change(
     change_index: int,
     change: Change,
     cursor: Cursor,
-    includes: set[Include],
+    included: set[Ref],
     renames: dict[Path, Path],
 ) -> Drawable:
     drawables = [
         render_change_title(
             change,
             cursor.is_title_selected(change_index),
-            ChangeInclude(change_index) in includes,
+            ChangeRef(change_index) in included,
             renames,
         )
     ]
@@ -752,7 +752,7 @@ def render_change(
             pass
 
         case AddFile(_, lines) | ModifyFile(_, lines) | DeleteFile(_, lines):
-            drawables.append(render_change_lines(change_index, lines, cursor, includes))
+            drawables.append(render_change_lines(change_index, lines, cursor, included))
 
         case AddBinary() | ModifyBinary() | DeleteBinary():
             drawables.append(render_binary(change_index, cursor))
@@ -776,7 +776,7 @@ def render_change_lines(
     change_index: int,
     lines: list[Line],
     cursor: Cursor,
-    includes: set[Include] | None = None,
+    included: set[Ref] | None = None,
 ) -> Drawable:
     drawables: list[Drawable] = []
     ranges: list[tuple[int, int]] = []
@@ -826,10 +826,10 @@ def render_change_lines(
 
         for line_index, line in enumerate(lines[start:end], start):
             selected = cursor.is_line_selected(change_index, line_index)
-            if includes is None:
-                included = None
+            if included is None:
+                line_included = None
             else:
-                included = LineInclude(change_index, line_index) in includes
+                line_included = LineRef(change_index, line_index) in included
 
             underline_old: list[tuple[int, int]] = []
             underline_new: list[tuple[int, int]] = []
@@ -860,7 +860,7 @@ def render_change_lines(
                         old_line_status,
                         line.old,
                         selected,
-                        included,
+                        line_included,
                         underline_old,
                     ),
                     *render_line(
@@ -868,7 +868,7 @@ def render_change_lines(
                         new_line_status,
                         line.new,
                         selected,
-                        included,
+                        line_included,
                         underline_new,
                     ),
                 )
