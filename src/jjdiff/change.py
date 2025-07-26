@@ -285,3 +285,18 @@ def apply_change(root: Path, change: Change) -> None:
 
 def lines_to_text(lines: list[Line]) -> str:
     return "\n".join(line.new for line in lines if line.new is not None)
+
+
+def get_change_refs(change_index: int, change: Change) -> set[Ref]:
+    refs: set[Ref] = set()
+
+    # For modify file the change itself does nothing, just the lines matters
+    if not isinstance(change, ModifyFile):
+        refs.add(ChangeRef(change_index))
+
+    # For file changes we care about the lines
+    if isinstance(change, FILE_CHANGE_TYPES):
+        for line_index in range(len(change.lines)):
+            refs.add(LineRef(change_index, line_index))
+
+    return refs

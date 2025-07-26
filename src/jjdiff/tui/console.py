@@ -9,8 +9,7 @@ import tty
 from types import FrameType
 from typing import Final, cast
 
-from jjdiff.keyboard import Keyboard
-
+from .keyboard import Keyboard
 from .drawable import Drawable, Metadata
 from .text import Text, TextStyle
 
