@@ -8,6 +8,7 @@ from .drawable import Drawable
 
 class Fill(Drawable):
     fill: str
+    style: TextStyle
 
     def __init__(self, fill: str = " ", style: TextStyle = DEFAULT_TEXT_STYLE):
         self.fill = fill
@@ -18,7 +19,7 @@ class Fill(Drawable):
         return 0
 
     @override
-    def render(self, width: int) -> Iterator[str]:
+    def _render(self, width: int) -> Iterator[str]:
         parts = [self.style.style_code]
 
         while width:
