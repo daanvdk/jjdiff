@@ -1,3 +1,4 @@
+from asyncio import CancelledError
 import os
 import select
 import sys
@@ -43,16 +44,26 @@ def has_input() -> bool:
 class Keyboard:
     keys: list[str]
     chars: list[int]
+    reading: bool
 
     def __init__(self):
         self.keys = []
         self.chars = []
+        self.reading = False
 
     def get(self) -> str:
-        while True:
-            if key := self.pop_key():
-                return key
-            self.chars.append(get_char())
+        self.reading = True
+        try:
+            while True:
+                if key := self.pop_key():
+                    return key
+                self.chars.append(get_char())
+        finally:
+            self.reading = False
+
+    def cancel(self) -> None:
+        if self.reading:
+            raise CancelledError()
 
     def pop_key(self) -> str:
         key_map = KEY_MAP
@@ -79,3 +90,6 @@ class Keyboard:
             return "escape"
 
         return ""
+
+    class CancelledError(Exception):
+        pass

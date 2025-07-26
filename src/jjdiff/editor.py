@@ -1,18 +1,12 @@
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Mapping, Sequence
-from contextlib import ExitStack
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-import os
 from pathlib import Path
-import signal
-import sys
-import termios
-import tty
-from types import FrameType
 from typing import Literal, cast, override
 
-from .keyboard import Keyboard
+from jjdiff.console import Console
+
 from .change import (
     FILE_CHANGE_TYPES,
     AddBinary,
@@ -35,7 +29,7 @@ from .change import (
     Rename,
     filter_changes,
 )
-from .drawable import Drawable
+from .drawable import Drawable, Marker, Metadata
 from .rows import Rows
 from .fill import Fill
 from .text import Text, TextColor, TextStyle
@@ -56,13 +50,12 @@ SELECTED_BG: Mapping[bool, TextColor | None] = {
     True: "bright black",
     False: None,
 }
-BLOCK: Mapping[tuple[bool, bool], str] = {
-    (False, False): " ",
-    (False, True): "\u2584",
-    (True, False): "\u2580",
-    (True, True): "\u2588",
-}
-EDGE_PADDING = 5
+
+
+class SelectionMarker(Marker[None]):
+    @override
+    def get_value(self) -> None:
+        return None
 
 
 @dataclass
@@ -162,7 +155,7 @@ class RemoveIncludes(Action):
         editor.included |= self.refs
 
 
-class Editor:
+class Editor(Console[Iterable[Change] | None]):
     changes: Sequence[Change]
 
     included: set[Ref]
@@ -174,20 +167,10 @@ class Editor:
     undo_stack: list[tuple[Action, set[ChangeRef], Cursor]]
     redo_stack: list[tuple[Action, set[ChangeRef], Cursor]]
 
-    drawable: Drawable
     cursor: Cursor
-    width: int
-    height: int
-    y: int
-    lines: list[str]
-
-    should_render: bool
-    should_draw: bool
-    should_exit: bool
-    is_reading: bool
-    result: Iterator[Change] | None
 
     def __init__(self, changes: Sequence[Change]):
+        super().__init__()
         self.changes = changes
 
         self.included = set()
@@ -200,18 +183,10 @@ class Editor:
         self.undo_stack = []
         self.redo_stack = []
 
-        self.drawable = Text("")
         self.cursor = ChangeCursor(0)
-        self.width = 0
-        self.height = 0
-        self.y = 0
-        self.lines = []
 
-        self.should_render = True
-        self.should_draw = True
-        self.should_exit = False
-        self.is_reading = False
-        self.result = None
+        if not changes:
+            self.set_result([])
 
     def add_dependencies(self) -> None:
         self.add_delete_add_dependencies()
@@ -263,104 +238,19 @@ class Editor:
         self.include_dependencies.setdefault(dependant, set()).add(dependency)
         self.include_dependants.setdefault(dependency, set()).add(dependant)
 
-    def get_cursor_range(self, width: int) -> tuple[int, int]:
-        # Add all changes up to the cursor to get the start line
-        changes: list[Change] = []
+    @override
+    def render(self) -> Drawable:
+        return render_changes(self.changes, self.cursor, self.included, self.opened)
 
-        match self.cursor:
-            case ChangeCursor(change):
-                changes.extend(self.changes[:change])
+    @override
+    def post_render(self, metadata: Metadata) -> None:
+        # Scroll to the selection
+        markers = SelectionMarker.get(metadata) or {0: []}
+        start = min(markers)
+        end = max(markers) + 1
+        self.scroll_to(start, end)
 
-            case HunkCursor(change, line) | LineCursor(change, line):
-                changes.extend(self.changes[:change])
-                match self.changes[change]:
-                    case AddFile(path, lines, is_exec):
-                        changes.append(AddFile(path, lines[:line], is_exec))
-                    case ModifyFile(path, lines):
-                        changes.append(ModifyFile(path, lines[:line]))
-                    case DeleteFile(path, lines, is_exec):
-                        changes.append(DeleteFile(path, lines[:line], is_exec))
-                    case _:
-                        pass  # never happens
-
-        cursor_start = render_changes(
-            changes, self.cursor, self.included, self.opened
-        ).height(width)
-
-        # Add all changes in the cursor to get the end line
-        match self.cursor:
-            case ChangeCursor(change):
-                changes.append(self.changes[change])
-
-            case HunkCursor(change, start, end):
-                partial_lines = cast(FileChange, changes[-1]).lines
-                change_lines = cast(FileChange, self.changes[change]).lines
-                partial_lines.extend(change_lines[start:end])
-
-            case LineCursor(change, line):
-                partial_lines = cast(FileChange, changes[-1]).lines
-                change_lines = cast(FileChange, self.changes[change]).lines
-                partial_lines.append(change_lines[line])
-
-        cursor_end = render_changes(
-            changes, self.cursor, self.included, self.opened
-        ).height(width)
-
-        return cursor_start, cursor_end
-
-    def draw(self) -> None:
-        render = self.should_render
-
-        if render:
-            self.should_render = False
-            self.drawable = render_changes(
-                self.changes, self.cursor, self.included, self.opened
-            )
-
-        width, self.height = os.get_terminal_size()
-
-        if render or width != self.width:
-            self.lines = list(self.drawable.render(width - 1))
-            self.width = width
-
-            start, end = self.get_cursor_range(width)
-
-            # Base the y on this
-            self.y = min(
-                max(self.y, end + EDGE_PADDING - self.height),
-                start - EDGE_PADDING,
-            )
-            self.y = max(min(self.y, len(self.lines) - self.height), 0)
-
-        sys.stdout.write("\x1b[2J\x1b[H")
-        for line in self.lines[self.y : self.y + self.height]:
-            sys.stdout.write(line)
-            sys.stdout.write("\x1b[1E")
-        self.draw_scrollbar()
-        sys.stdout.flush()
-
-    def draw_scrollbar(self) -> None:
-        blocks = self.height * 2
-        start = round(self.y / len(self.lines) * blocks)
-        end = round((self.y + self.height) / len(self.lines) * blocks)
-
-        sys.stdout.write(f"\x1b[H\x1b[{self.width - 1}C")
-        for i in range(0, blocks, 2):
-            style = TextStyle(fg="bright black")
-            block = BLOCK[start <= i < end, start <= i + 1 < end]
-            sys.stdout.write(f"{style.style_code}{block}{style.reset_code}")
-            sys.stdout.write("\x1b[1B")
-
-    def rerender(self):
-        self.should_draw = True
-        self.should_render = True
-
-    def redraw(self):
-        self.should_draw = True
-
-    def exit(self):
-        self.should_exit = True
-
+    @override
     def handle_key(self, key: str) -> None:
         match key:
             case "ctrl+c" | "ctrl+d" | "escape":
@@ -383,6 +273,9 @@ class Editor:
                 self.redo()
             case _:
                 pass
+
+    def exit(self) -> None:
+        self.set_result(None)
 
     def prev_cursor(self) -> None:
         match self.cursor:
@@ -666,74 +559,12 @@ class Editor:
         self.rerender()
 
     def confirm(self) -> None:
-        self.result = filter_changes(self.included, self.changes)
-        self.exit()
+        self.set_result(filter_changes(self.included, self.changes))
 
     def apply_action(self, action: Action) -> None:
         self.redo_stack.clear()
         self.undo_stack.append((action, self.opened.copy(), self.cursor))
         action.apply(self)
-
-    def on_resize(self, _signal: int, _frame: FrameType | None) -> None:
-        self.should_draw = True
-        if self.is_reading:
-            raise ReadCancelled()
-
-    def on_interrupt(self, _signal: int, _frame: FrameType | None) -> None:
-        self.should_exit = True
-        if self.is_reading:
-            raise ReadCancelled()
-
-
-def edit_changes(changes: Sequence[Change]) -> Iterator[Change]:
-    if not changes:
-        return iter([])
-
-    editor = Editor(changes)
-    keyboard = Keyboard()
-
-    with ExitStack() as stack:
-        # setup resize signal
-        prev_handler = signal.signal(signal.SIGWINCH, editor.on_resize)
-        stack.callback(signal.signal, signal.SIGWINCH, prev_handler)
-
-        # setup cbreak mode
-        attrs = tty.setraw(sys.stdin)
-        stack.callback(termios.tcsetattr, sys.stdin, termios.TCSADRAIN, attrs)
-
-        # hide cursor and switch to alternative buffer
-        write_and_flush("\x1b[?25l\x1b[?1049h")
-        stack.callback(write_and_flush, "\x1b[?1049l\x1b[?25h")
-
-        while not editor.should_exit:
-            if editor.should_draw:
-                editor.should_draw = False
-                editor.draw()
-
-            try:
-                editor.is_reading = True
-                try:
-                    key = keyboard.get()
-                finally:
-                    editor.is_reading = False
-            except ReadCancelled:
-                pass
-            else:
-                editor.handle_key(key)
-
-        if editor.result is None:
-            sys.exit(1)
-        else:
-            return editor.result
-
-
-def write_and_flush(content: str) -> None:
-    sys.stdout.write(content)
-    sys.stdout.flush()
-
-
-class ReadCancelled(Exception):
-    pass
 
 
 MIN_CONTEXT = 3
@@ -916,6 +747,9 @@ def render_change_lines(
                 old_line_status = line.status
                 new_line_status = line.status
 
+            if selected:
+                rows.append((SelectionMarker(), Rows(), Rows(), Rows()))
+
             rows.append(
                 (
                     *render_line(
@@ -1060,7 +894,11 @@ def render_change_title(
             )
         )
 
-    return Text.join(texts)
+    title = Text.join(texts)
+    if selected:
+        return Rows([SelectionMarker(), title])
+    else:
+        return title
 
 
 def render_omitted(lines: int, selected: bool) -> Drawable:
