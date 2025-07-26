@@ -1,7 +1,7 @@
 from collections.abc import Iterable, Iterator
-from typing import override
+from typing import Any, override
 
-from .drawable import Drawable
+from .drawable import Drawable, Marker
 
 
 class Grid(Drawable):
@@ -37,7 +37,7 @@ class Grid(Drawable):
         return base_width
 
     @override
-    def render(self, width: int) -> Iterator[str]:
+    def _render(self, width: int) -> Iterator[str | Marker[Any]]:
         # First start by filling the widths of fixed columns and getting the
         # total weight
         col_widths: list[int] = []
@@ -72,14 +72,24 @@ class Grid(Drawable):
         # Now we can render the rows
         for row in self.rows:
             row_lines: list[list[str]] = []
+            row_markers: list[list[Marker[Any]]] = []
 
             for col, cell in enumerate(row):
                 y = 0
                 col_width = col_widths[col]
 
-                for cell_line in cell.render(col_width):
+                for cell_line in cell._render(col_width):
+                    if isinstance(cell_line, Marker):
+                        if y == 0:
+                            yield cell_line
+                        else:
+                            row_markers[y - 1].append(cell_line)
+                        continue
+
                     if y == len(row_lines):
                         row_lines.append([" " * w for w in col_widths[:col]])
+                        row_markers.append([])
+
                     row_lines[y].append(cell_line)
                     y += 1
 
@@ -87,5 +97,6 @@ class Grid(Drawable):
                     row_lines[y].append(" " * col_width)
                     y += 1
 
-            for row_line in row_lines:
+            for row_line, markers in zip(row_lines, row_markers):
                 yield "".join(row_line)
+                yield from markers
