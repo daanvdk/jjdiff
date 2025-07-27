@@ -16,15 +16,15 @@ from .change import render_change
 
 def render_changes(
     changes: Sequence[Change],
-    cursor: Cursor,
-    included: set[Ref],
-    opened: set[ChangeRef],
+    cursor: Cursor | None,
+    included: set[Ref] | None,
+    opened: set[ChangeRef] | None,
 ) -> Drawable:
     drawables: list[Drawable] = []
     renames: dict[Path, Path] = {}
 
     for i, change in enumerate(changes):
-        change_opened = ChangeRef(i) in opened
+        change_opened = opened is None or ChangeRef(i) in opened
 
         drawables.append(
             render_change(i, change, cursor, included, change_opened, renames)

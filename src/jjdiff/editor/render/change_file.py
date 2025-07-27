@@ -24,7 +24,7 @@ MIN_OMITTED = 2
 def render_change_file(
     change_index: int,
     lines: list[Line],
-    cursor: Cursor,
+    cursor: Cursor | None,
     included: set[Ref] | None = None,
     line_nums: bool = True,
 ) -> Drawable:
@@ -66,7 +66,7 @@ def render_change_file(
             drawables.append(
                 render_omitted(
                     start - index,
-                    cursor.is_all_lines_selected(change_index),
+                    cursor is not None and cursor.is_all_lines_selected(change_index),
                 )
             )
         else:
@@ -75,7 +75,9 @@ def render_change_file(
         rows: list[tuple[Drawable, ...]] = []
 
         for line_index, line in enumerate(lines[start:end], start):
-            selected = cursor.is_line_selected(change_index, line_index)
+            selected = cursor is not None and cursor.is_line_selected(
+                change_index, line_index
+            )
             if included is None:
                 line_included = None
             else:
@@ -141,7 +143,7 @@ def render_change_file(
         drawables.append(
             render_omitted(
                 len(lines) - index,
-                cursor.is_all_lines_selected(change_index),
+                cursor is not None and cursor.is_all_lines_selected(change_index),
             )
         )
 

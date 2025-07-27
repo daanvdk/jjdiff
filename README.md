@@ -24,3 +24,15 @@ This cursor can operate on 3 levels:
 | `confirm` | `enter` | Confirm the selected changes. | 
 | `undo` | `u` | Undo the last command. Commands that only affect the UI state like changing the cursor and opening/closing changes are not included in this. |
 | `redo` | `U` | Redo the last undone command. Commands that only affect the UI state like changing the cursor and opening/closing changes are not included in this. |
+
+## Usage
+jjdiff is available on pypi. You can use any way you are comfortable installing
+python applications.
+
+You can then use it by adding the following settings to `~/.config/jj/config.toml`:
+```toml
+[ui]
+diff-editor = "jjdiff"
+diff-instructions = false  # not required but recommended
+diff.tool = "jjdiff --print"  # to also format diffs using jjdiff
+```
