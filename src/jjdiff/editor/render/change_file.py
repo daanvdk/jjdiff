@@ -196,14 +196,18 @@ def render_line(
         bg = SELECTED_BG[selected]
 
         gutter = Text("\u258f" + "\u2571" * 6, TextStyle(fg=fg, bg=bg))
+        gutter_padding = gutter
         drawable = Fill("\u2571", TextStyle(fg=fg, bg=bg))
+        drawable_padding = drawable
 
     elif status == "unchanged":
         fg = SELECTED_FG[selected]
         bg = SELECTED_BG[selected]
 
         gutter = Text(f"\u258f {line_num} ", TextStyle(fg=fg, bg=bg))
+        gutter_padding = Text("\u258f      ", TextStyle(fg=fg, bg=bg))
         drawable = render_line_content(content, underline, TextStyle(bg=bg))
+        drawable_padding = Fill(" ", TextStyle(bg=bg))
 
     elif included is True:
         fg = STATUS_COLOR[status]
@@ -215,28 +219,39 @@ def render_line(
                 Text("\u258c", TextStyle(fg=fg, bg=bg)),
             ]
         )
+        gutter_padding = Text.join(
+            [
+                Text("      ", TextStyle(fg="black", bg=fg, bold=True)),
+                Text("\u258c", TextStyle(fg=fg, bg=bg)),
+            ]
+        )
 
         drawable = render_line_content(
             content,
             underline,
             TextStyle(fg=fg, bg=bg, bold=True, italic=True),
         )
+        drawable_padding = Fill(" ", TextStyle(bg=bg))
 
     elif included is False:
         fg = STATUS_COLOR[status]
         bg = SELECTED_BG[selected]
 
         gutter = Text(f"\u258c\u2717{line_num} ", TextStyle(fg=fg, bg=bg))
+        gutter_padding = Text("\u258c      ", TextStyle(fg=fg, bg=bg))
         drawable = render_line_content(content, underline, TextStyle(fg=fg, bg=bg))
+        drawable_padding = Fill(" ", TextStyle(bg=bg))
 
     else:
         fg = STATUS_COLOR[status]
         bg = SELECTED_BG[selected]
 
         gutter = Text(f"\u258c {line_num} ", TextStyle(fg=fg, bg=bg))
+        gutter_padding = Text("\u258c      ", TextStyle(fg=fg, bg=bg))
         drawable = render_line_content(content, underline, TextStyle(fg=fg, bg=bg))
+        drawable_padding = Fill(" ", TextStyle(bg=bg))
 
-    return gutter, drawable
+    return Grid.Cell(gutter, gutter_padding), Grid.Cell(drawable, drawable_padding)
 
 
 def render_line_content(

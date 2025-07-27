@@ -1,4 +1,3 @@
-from asyncio import CancelledError
 import os
 import select
 import sys
@@ -63,7 +62,7 @@ class Keyboard:
 
     def cancel(self) -> None:
         if self.reading:
-            raise CancelledError()
+            raise Keyboard.CancelledError()
 
     def pop_key(self) -> str:
         key_map = KEY_MAP
