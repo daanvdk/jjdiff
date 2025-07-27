@@ -266,7 +266,10 @@ def diff_lines(old: list[str], new: list[str]) -> list[Line]:
             heapq.heappush(
                 states,
                 (
-                    min_cost + int(old_todo <= new_todo),
+                    # If we have more old_todo than new_todo the change to
+                    # the heuristic and the cost cancel eachother out,
+                    # otherwise they add up and thus get a cost of 2.
+                    min_cost + 2 * int(old_todo <= new_todo),
                     2,
                     old_index + 1,
                     new_index,
@@ -278,7 +281,10 @@ def diff_lines(old: list[str], new: list[str]) -> list[Line]:
             heapq.heappush(
                 states,
                 (
-                    min_cost + int(new_todo <= old_todo),
+                    # If we have more new_todo than old_todo the change to
+                    # the heuristic and the cost cancel eachother out,
+                    # otherwise they add up and thus get a cost of 2.
+                    min_cost + 2 * int(new_todo <= old_todo),
                     1,
                     old_index,
                     new_index + 1,
