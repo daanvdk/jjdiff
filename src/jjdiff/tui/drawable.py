@@ -1,9 +1,25 @@
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterator
+import fcntl
+import struct
+import termios
 from typing import Any, cast, override
 
 
 type Metadata = dict[type, dict[int, list[Any]]]
+
+
+def get_terminal_size_from_tty():
+    # This enables us to still get the terminal size even if the program is
+    # called through a subprocess and is thus not directly connected to the
+    # TTY. This is needed to be able to use jjdiff as a diff-formatter.
+    try:
+        with open("/dev/tty") as fd:
+            packed = fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\0" * 8)
+            rows, cols = cast(tuple[int, int], struct.unpack("hhhh", packed)[:2])
+            return cols, rows
+    except Exception:
+        return 80, 24  # Fallback
 
 
 class Drawable(ABC):
@@ -35,6 +51,11 @@ class Drawable(ABC):
         for _ in self.render(width):
             height += 1
         return height
+
+    def print(self) -> None:
+        width, _ = get_terminal_size_from_tty()
+        for line in self.render(width):
+            print(line)
 
 
 class Marker[T](Drawable, ABC):

@@ -39,15 +39,17 @@ EXEC_LINE = {
 def render_change(
     change_index: int,
     change: Change,
-    cursor: Cursor,
-    included: set[Ref],
+    cursor: Cursor | None,
+    included: set[Ref] | None,
     opened: bool,
     renames: dict[Path, Path],
 ) -> Drawable:
     change_refs = get_change_refs(change_index, change)
 
-    change_included: ChangeIncluded
-    if not (change_refs - included):
+    change_included: ChangeIncluded | None
+    if included is None:
+        change_included = None
+    elif not (change_refs - included):
         change_included = "full"
     elif change_refs & included:
         change_included = "partial"
@@ -56,7 +58,7 @@ def render_change(
 
     title = render_change_title(
         change,
-        cursor.is_title_selected(change_index),
+        cursor is not None and cursor.is_title_selected(change_index),
         change_included,
         renames,
     )

@@ -7,8 +7,8 @@ from ..cursor import Cursor
 from .styles import SELECTED_BG, SELECTED_FG
 
 
-def render_change_binary(change_index: int, cursor: Cursor) -> Drawable:
-    selected = cursor.is_all_lines_selected(change_index)
+def render_change_binary(change_index: int, cursor: Cursor | None) -> Drawable:
+    selected = cursor is not None and cursor.is_all_lines_selected(change_index)
 
     fg = SELECTED_FG[selected]
     bg = SELECTED_BG[selected]

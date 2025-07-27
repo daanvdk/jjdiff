@@ -30,7 +30,7 @@ type ChangeIncluded = Literal["full", "partial", "none"]
 def render_change_title(
     change: Change,
     selected: bool,
-    included: ChangeIncluded,
+    included: ChangeIncluded | None,
     renames: dict[Path, Path],
 ) -> Drawable:
     fg: TextColor
@@ -115,6 +115,8 @@ def render_change_title(
             )
         case "none":
             action_text = Text(f"\u258c\u2717 {action} ", TextStyle(fg=fg, bg=bg))
+        case None:
+            action_text = Text(f"\u258c {action} ", TextStyle(fg=fg, bg=bg))
 
     texts = [
         action_text,
