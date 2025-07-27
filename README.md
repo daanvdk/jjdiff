@@ -34,5 +34,5 @@ You can then use it by adding the following settings to `~/.config/jj/config.tom
 [ui]
 diff-editor = "jjdiff"
 diff-instructions = false  # not required but recommended
-diff.tool = "jjdiff --print"  # to also format diffs using jjdiff
+diff-formatter = "jjdiff --print"  # to also format diffs using jjdiff
 ```
