@@ -1,12 +1,14 @@
 from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 from typing import Any, override
 
 from .drawable import Drawable, Marker
+from .fill import Fill
 
 
 class Grid(Drawable):
     columns: tuple[int | None, ...]
-    rows: list[tuple[Drawable, ...]]
+    rows: list[tuple["Drawable | Cell", ...]]
 
     def __init__(
         self,
@@ -87,16 +89,40 @@ class Grid(Drawable):
                         continue
 
                     if y == len(row_lines):
-                        row_lines.append([" " * w for w in col_widths[:col]])
+                        row_lines.append([])
+                        for x in range(col):
+                            row_lines[y].append(cell_padding(row[x], col_widths[x]))
                         row_markers.append([])
 
                     row_lines[y].append(cell_line)
                     y += 1
 
                 while y < len(row_lines):
-                    row_lines[y].append(" " * col_width)
+                    row_lines[y].append(cell_padding(cell, col_width))
                     y += 1
 
             for row_line, markers in zip(row_lines, row_markers):
                 yield "".join(row_line)
                 yield from markers
+
+    @dataclass
+    class Cell(Drawable):
+        drawable: Drawable
+        padding: Drawable
+
+        @override
+        def base_width(self) -> int:
+            return self.drawable.base_width()
+
+        @override
+        def _render(self, width: int) -> Iterator[str | Marker[Any]]:
+            return self.drawable._render(width)
+
+
+def cell_padding(drawable: Drawable, width: int) -> str:
+    if isinstance(drawable, Grid.Cell):
+        padding = drawable.padding
+    else:
+        padding = Fill()
+        raise Exception(f"dafuq {drawable!r}")
+    return next(padding.render(width))

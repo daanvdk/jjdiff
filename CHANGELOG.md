@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File changes now show a check if they are fully selected, a minus sign if they are partially selected, and a cross if they are not selected at all.
 - Renames and mode changes now show a diff when opened.
 
+### Fixed
+- Fixed visual issues around line wrapping.
+
 ## [0.1.0] - 2025-07-25
 ### Added
 - Initial version of the application.
