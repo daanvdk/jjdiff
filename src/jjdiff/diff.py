@@ -1,6 +1,8 @@
-from collections.abc import Iterator, Mapping, Sequence
+from collections import Counter
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+import hashlib
 import heapq
 from itertools import product
 from pathlib import Path
@@ -109,21 +111,18 @@ def diff_contents(
     # Start with going through all new content and diffing if it also existed
     # in the old content, if not we add it to the added dict
     for path, new_content in new.items():
-        old_content = old.get(path)
-
-        if old_content is None:
+        try:
+            old_content = old[path]
+        except KeyError:
             added[path] = new_content
-            continue
-
-        is_deprioritized = path_deprioritized(path)
-        changes.extend(diff_content(path, old_content, new_content, is_deprioritized))
+        else:
+            is_deprioritized = path_deprioritized(path)
+            changes.extend(
+                diff_content(path, old_content, new_content, is_deprioritized)
+            )
 
     # Now we look for all paths that are in old but not in new
-    deleted: dict[Path, Content] = {}
-
-    for path in old:
-        if path not in new:
-            deleted[path] = old[path]
+    deleted = {path: old[path] for path in old if path not in new}
 
     # Now we try to find renames between the old and new paths
     renames: list[tuple[float, Path, Path]] = []
@@ -215,13 +214,87 @@ def diff_content(
 def get_content_similarity(old_content: Content, new_content: Content) -> float:
     match old_content, new_content:
         case File(old_lines), File(new_lines):
-            return get_similarity(old_lines, new_lines)
+            return get_text_similarity(old_lines, new_lines)
         case Binary(old_data), Binary(new_data):
-            return get_similarity(old_data, new_data)
+            return get_binary_similarity(old_data, new_data)
         case Symlink(old_to), Binary(new_to):
-            return get_similarity(str(old_to), str(new_to))
+            return get_line_similarity(str(old_to), str(new_to))
         case _:
             return 0
+
+
+def get_text_similarity(old_lines: list[str], new_lines: list[str]) -> float:
+    old_counts = get_line_counts(old_lines)
+    new_counts = get_line_counts(new_lines)
+
+    total = old_counts.total() + new_counts.total()
+    if total == 0:
+        return 1
+
+    common = (old_counts & new_counts).total()
+    return common * 2 / total
+
+
+def get_line_counts(lines: list[str]) -> Counter[str]:
+    counts = Counter[str]()
+
+    for line in lines:
+        line = line.strip()
+        if line:
+            counts[line] += 1
+
+    return counts
+
+
+def get_binary_similarity(old_data: bytes, new_data: bytes) -> float:
+    old_chunks = set(map(stable_hash, get_binary_chunks(old_data)))
+    new_chunks = set(map(stable_hash, get_binary_chunks(new_data)))
+
+    total = len(old_chunks) + len(new_chunks)
+    if total == 0:
+        return 1
+
+    common = len(old_chunks & new_chunks)
+    return common * 2 / total
+
+
+WINDOW_SIZE = 48
+WINDOW_MASK = (1 << 12) - 1
+
+HASH_BASE = 263
+HASH_MODULUS = (1 << 31) - 1
+HASH_BASE_POWER = pow(HASH_BASE, WINDOW_SIZE, HASH_MODULUS)
+
+
+def get_binary_chunks(data: bytes) -> Iterator[bytes]:
+    if len(data) <= WINDOW_SIZE:
+        yield data
+        return
+
+    curr_hash = 0
+    for i in range(WINDOW_SIZE):
+        curr_hash = (curr_hash * HASH_BASE + data[i]) % HASH_MODULUS
+
+    start = 0
+    for i in range(WINDOW_SIZE, len(data)):
+        if curr_hash & WINDOW_MASK == 0:
+            yield data[start:i]
+            start = i
+
+        old_byte = data[i - WINDOW_SIZE]
+        new_byte = data[i]
+
+        curr_hash = (
+            curr_hash - (old_byte * HASH_BASE_POWER) % HASH_MODULUS
+        ) % HASH_MODULUS
+        curr_hash = (curr_hash * HASH_BASE + new_byte) % HASH_MODULUS
+
+    if start < len(data):
+        yield data[start:]
+
+
+def stable_hash(data: bytes) -> bytes:
+    return hashlib.blake2b(data, digest_size=8).digest()
 
 
 def delete_content(path: Path, content: Content, is_deprioritized: bool) -> Change:
@@ -248,8 +321,11 @@ def add_content(path: Path, content: Content, is_deprioritized: bool) -> Change:
             return AddSymlink(path, to, is_deprioritized)
 
 
-def get_similarity[T](old: Sequence[T], new: Sequence[T]) -> float:
-    return SequenceMatcher(None, old, new).ratio()
+def get_line_similarity(old: str, new: str) -> float:
+    if old == new:
+        return 1
+    else:
+        return SequenceMatcher(None, old, new).ratio()
 
 
 def diff_lines(old: list[str], new: list[str]) -> list[Line]:
@@ -314,7 +390,7 @@ def diff_lines(old: list[str], new: list[str]) -> list[Line]:
         if old_todo and new_todo:
             old_line = old[old_index]
             new_line = new[new_index]
-            similarity = get_similarity(old_line, new_line)
+            similarity = get_line_similarity(old_line, new_line)
 
             if similarity >= SIMILARITY_THRESHOLD:
                 heapq.heappush(
