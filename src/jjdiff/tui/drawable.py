@@ -28,14 +28,14 @@ class Drawable(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def _render(self, width: int) -> Iterator["str | Marker[Any]"]:
+    def _render(self, width: int, height: int | None) -> Iterator["str | Marker[Any]"]:
         raise NotImplementedError
 
-    def render(self, width: int) -> Generator[str, None, Metadata]:
+    def render(self, width: int, height: int | None) -> Generator[str, None, Metadata]:
         metadata: Metadata = {}
         y = 0
 
-        for line in self._render(width):
+        for line in self._render(width, height):
             if isinstance(line, Marker):
                 cls_metadata = metadata.setdefault(type(line), {})
                 line_metadata = cls_metadata.setdefault(y, [])
@@ -46,15 +46,15 @@ class Drawable(ABC):
 
         return metadata
 
-    def height(self, width: int) -> int:
-        height = 0
-        for _ in self.render(width):
-            height += 1
-        return height
+    def height(self, width: int, height: int | None) -> int:
+        res = 0
+        for _ in self.render(width, height):
+            res += 1
+        return res
 
     def print(self) -> None:
         width, _ = get_terminal_size_from_tty()
-        for line in self.render(width):
+        for line in self.render(width, None):
             print(line)
 
 
@@ -72,5 +72,5 @@ class Marker[T](Drawable, ABC):
         return 0
 
     @override
-    def _render(self, width: int) -> Iterator["str | Marker[Any]"]:
+    def _render(self, width: int, height: int | None) -> Iterator["str | Marker[Any]"]:
         yield self

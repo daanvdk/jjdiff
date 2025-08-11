@@ -181,7 +181,7 @@ class Text(Drawable):
         return max_width
 
     @override
-    def _render(self, width: int) -> Iterator[str]:
+    def _render(self, width: int, height: int | None) -> Iterator[str]:
         line: list[str] = []
         x = 0
         y = 0
@@ -243,5 +243,7 @@ class Text(Drawable):
 
                 if newline:
                     yield get_line()
+                    if y == height:
+                        return
 
         yield get_line()

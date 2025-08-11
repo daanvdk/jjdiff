@@ -4,7 +4,9 @@ from pathlib import Path
 from typing import override
 
 from jjdiff.tui.console import Console
-from jjdiff.tui.drawable import Drawable, Metadata
+from jjdiff.tui.drawable import Drawable
+from jjdiff.tui.scroll import Scroll
+from jjdiff.tui.text import TextStyle
 
 
 from ..change import (
@@ -23,6 +25,9 @@ from ..change import (
 from .cursor import Cursor, ChangeCursor
 from .render.changes import render_changes
 from .render.markers import SelectionMarker
+
+
+SCROLLBAR_STYLE = TextStyle(fg="bright black")
 
 
 class Action(ABC):
@@ -80,7 +85,7 @@ class Editor(Console[Iterable[Change] | None]):
     cursor: Cursor
 
     def __init__(self, changes: Sequence[Change]):
-        super().__init__()
+        super().__init__(SCROLLBAR_STYLE)
         self.changes = changes
 
         self.included = set()
@@ -153,12 +158,12 @@ class Editor(Console[Iterable[Change] | None]):
         return render_changes(self.changes, self.cursor, self.included, self.opened)
 
     @override
-    def post_render(self, metadata: Metadata) -> None:
+    def post_render(self, scroll_state: Scroll.State) -> None:
         # Scroll to the selection
-        markers = SelectionMarker.get(metadata) or {0: []}
+        markers = SelectionMarker.get(scroll_state.metadata) or {0: []}
         start = min(markers)
         end = max(markers) + 1
-        self.scroll_to(start, end)
+        scroll_state.scroll_to(start, end)
 
     @override
     def handle_key(self, key: str) -> None:
