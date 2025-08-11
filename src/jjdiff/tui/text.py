@@ -140,7 +140,7 @@ class Text(Drawable):
     spans: tuple[TextSpan, ...]
 
     def __init__(self, content: str = "", style: TextStyle = DEFAULT_TEXT_STYLE):
-        self.spans = (TextSpan(content, style),)
+        self.spans = (TextSpan(normalize(content), style),)
 
     def __add__(self, other: "Text") -> "Text":
         return Text.join([self, other])
@@ -247,3 +247,7 @@ class Text(Drawable):
                         return
 
         yield get_line()
+
+
+def normalize(content: str) -> str:
+    return content.replace("\r", "").replace("\t", "    ")
