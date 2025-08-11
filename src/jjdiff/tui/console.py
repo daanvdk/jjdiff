@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
 from contextlib import ExitStack
 import os
 import signal
@@ -7,11 +6,12 @@ import sys
 import termios
 import tty
 from types import FrameType
-from typing import Final, cast
+from typing import Final
 
 from .keyboard import Keyboard
-from .drawable import Drawable, Metadata
-from .text import Text, TextStyle
+from .drawable import Drawable
+from .text import DEFAULT_TEXT_STYLE, Text, TextStyle
+from .scroll import Scroll
 
 
 class NoResult:
@@ -20,39 +20,28 @@ class NoResult:
 
 NO_RESULT: Final[NoResult] = NoResult()
 
-SCROLLBAR_STYLE = TextStyle(fg="bright black")
-SCROLLBAR_CHAR: Mapping[tuple[bool, bool], str] = {
-    (False, False): " ",
-    (False, True): "\u2584",
-    (True, False): "\u2580",
-    (True, True): "\u2588",
-}
-
 
 class Console[Result](ABC):
-    _drawable: Drawable
-
     width: int
     height: int
+    scroll_state: Scroll.State
+    scrollbar_style: TextStyle
 
-    _y: int
+    _drawable: Drawable
     _lines: list[str]
-
     _redraw: bool
-    _ignore_redraw: bool
     _rerender: bool
     _keyboard: Keyboard
     _result: Result | NoResult
 
-    def __init__(self):
-        self._drawable = Text("")
-
+    def __init__(self, scrollbar_style: TextStyle = DEFAULT_TEXT_STYLE):
+        self.scroll_state = Scroll.State(self.post_render)
+        self.scrollbar_style = scrollbar_style
         self.width = 0
         self.height = 0
 
+        self._drawable = Text("")
         self._lines = []
-        self._y = 0
-
         self._redraw = True
         self._rerender = True
         self._keyboard = Keyboard()
@@ -66,7 +55,7 @@ class Console[Result](ABC):
     def handle_key(self, key: str) -> None:
         raise NotImplementedError
 
-    def post_render(self, _metadata: Metadata) -> None:
+    def post_render(self, _scroll_state: Scroll.State) -> None:
         pass
 
     @property
@@ -78,16 +67,8 @@ class Console[Result](ABC):
         self.redraw()
 
     def redraw(self) -> None:
-        if not self._ignore_redraw:
-            self._redraw = True
-            self._keyboard.cancel()
-
-    def scroll_to(self, start: int, end: int, *, padding: int = 5) -> None:
-        y = min(max(self._y, end + padding - self.height), start - padding)
-        y = max(min(y, self.lines - self.height), 0)
-
-        self._y = y
-        self.redraw()
+        self._redraw = True
+        self._keyboard.cancel()
 
     def set_result(self, result: Result) -> None:
         self._result = result
@@ -95,51 +76,28 @@ class Console[Result](ABC):
     def _draw(self) -> None:
         if self._rerender:
             self._rerender = False
-            self._drawable = self.render()
+            self._drawable = Scroll(
+                self.render(),
+                self.scroll_state,
+                self.scrollbar_style,
+            )
             rerendered = True
         else:
             rerendered = False
 
-        width, self.height = os.get_terminal_size()
+        width, height = os.get_terminal_size()
 
-        if rerendered or width != self.width:
+        if rerendered or width != self.width or height != self.height:
             self.width = width
+            self.height = height
             self._lines.clear()
-            lines = self._drawable.render(self.width - 1)
-            try:
-                while True:
-                    self._lines.append(next(lines))
-            except StopIteration as e:
-                metadata = cast(Metadata, e.value)
-
-            self._ignore_redraw = True
-            try:
-                self.post_render(metadata)
-            finally:
-                self._ignore_redraw = False
+            self._lines.extend(self._drawable.render(width, height))
 
         sys.stdout.write("\x1b[2J\x1b[H")
-        for line in self._lines[self._y : self._y + self.height]:
+        for line in self._lines[:height]:
             sys.stdout.write(line)
             sys.stdout.write("\x1b[1E")
-        self._draw_scrollbar()
         sys.stdout.flush()
-
-    def _draw_scrollbar(self) -> None:
-        blocks = self.height * 2
-        start = round(self._y / self.lines * blocks)
-        end = round((self._y + self.height) / self.lines * blocks)
-
-        sys.stdout.write(f"\x1b[H\x1b[{self.width - 1}C")
-        sys.stdout.write(SCROLLBAR_STYLE.style_code)
-
-        for i in range(0, blocks, 2):
-            top = start <= i < end
-            bot = start <= i + 1 < end
-            sys.stdout.write(SCROLLBAR_CHAR[(top, bot)])
-            sys.stdout.write("\x1b[1B")
-
-        sys.stdout.write(SCROLLBAR_STYLE.reset_code)
 
     def run(self) -> Result:
         def on_resize(_signal: int, _frame: FrameType | None) -> None:

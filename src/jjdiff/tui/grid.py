@@ -39,7 +39,7 @@ class Grid(Drawable):
         return base_width
 
     @override
-    def _render(self, width: int) -> Iterator[str | Marker[Any]]:
+    def _render(self, width: int, height: int | None) -> Iterator[str | Marker[Any]]:
         # First start by filling the widths of fixed columns and getting the
         # total weight
         col_widths: list[int] = []
@@ -80,7 +80,7 @@ class Grid(Drawable):
                 y = 0
                 col_width = col_widths[col]
 
-                for cell_line in cell._render(col_width):
+                for cell_line in cell._render(col_width, height):
                     if isinstance(cell_line, Marker):
                         if y == 0:
                             yield cell_line
@@ -105,6 +105,9 @@ class Grid(Drawable):
                 yield "".join(row_line)
                 yield from markers
 
+            if height is not None:
+                height -= len(row_lines)
+
     @dataclass
     class Cell(Drawable):
         drawable: Drawable
@@ -115,8 +118,10 @@ class Grid(Drawable):
             return self.drawable.base_width()
 
         @override
-        def _render(self, width: int) -> Iterator[str | Marker[Any]]:
-            return self.drawable._render(width)
+        def _render(
+            self, width: int, height: int | None
+        ) -> Iterator[str | Marker[Any]]:
+            return self.drawable._render(width, height)
 
 
 def cell_padding(drawable: Drawable, width: int) -> str:
@@ -124,5 +129,4 @@ def cell_padding(drawable: Drawable, width: int) -> str:
         padding = drawable.padding
     else:
         padding = Fill()
-        raise Exception(f"dafuq {drawable!r}")
-    return next(padding.render(width))
+    return next(padding.render(width, 1))

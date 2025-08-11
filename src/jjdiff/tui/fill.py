@@ -19,7 +19,10 @@ class Fill(Drawable):
         return 0
 
     @override
-    def _render(self, width: int) -> Iterator[str]:
+    def _render(self, width: int, height: int | None) -> Iterator[str]:
+        if height == 0:
+            return
+
         parts = [self.style.style_code]
 
         while width:
