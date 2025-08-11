@@ -329,6 +329,23 @@ def get_line_similarity(old: str, new: str) -> float:
 
 
 def diff_lines(old: list[str], new: list[str]) -> list[Line]:
+    start = 0
+    while start < len(old) and start < len(new) and old[start] == new[start]:
+        start += 1
+
+    old_end = len(old)
+    new_end = len(new)
+    while old_end > start and new_end > start and old[old_end - 1] == new[new_end - 1]:
+        old_end -= 1
+        new_end -= 1
+
+    lines = [Line(line, line) for line in old[:start]]
+    lines.extend(diff_lines_base(old[start:old_end], new[start:new_end]))
+    lines.extend(Line(line, line) for line in old[old_end:])
+    return lines
+
+
+def diff_lines_base(old: list[str], new: list[str]) -> list[Line]:
     min_cost: float = abs(len(old) - len(new))
     states: list[tuple[float, int, int, int, Line | None]] = [(min_cost, 0, 0, 0, None)]
     line_to: dict[tuple[int, int], Line | None] = {}
