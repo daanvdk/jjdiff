@@ -156,19 +156,15 @@ def render_omitted(lines: int, selected: bool) -> Drawable:
     else:
         plural = "s"
 
-    fg = SELECTED_FG[selected]
-    bg = SELECTED_BG[selected]
+    style = TextStyle(fg=SELECTED_FG[selected], bg=SELECTED_BG[selected])
 
     return Grid(
         (1, None, 1),
         [
             (
-                Fill("\u2500", style=TextStyle(fg=fg, bg=bg)),
-                Text(
-                    f" omitted {lines} unchanged line{plural} ",
-                    style=TextStyle(fg="white", bg=bg),
-                ),
-                Fill("\u2500", style=TextStyle(fg=fg, bg=bg)),
+                Fill("\u2500", style),
+                Text(f" omitted {lines} unchanged line{plural} ", style),
+                Fill("\u2500", style),
             )
         ],
     )
