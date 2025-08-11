@@ -346,8 +346,8 @@ def diff_lines(old: list[str], new: list[str]) -> list[Line]:
 
 
 def diff_lines_base(old: list[str], new: list[str]) -> list[Line]:
-    min_cost: float = abs(len(old) - len(new))
-    states: list[tuple[float, int, int, int, Line | None]] = [(min_cost, 0, 0, 0, None)]
+    min_cost = 100 * abs(len(old) - len(new))
+    states: list[tuple[int, int, int, int, Line | None]] = [(min_cost, 0, 0, 0, None)]
     line_to: dict[tuple[int, int], Line | None] = {}
 
     while True:
@@ -381,7 +381,7 @@ def diff_lines_base(old: list[str], new: list[str]) -> list[Line]:
                     # If we have more old_todo than new_todo the change to
                     # the heuristic and the cost cancel eachother out,
                     # otherwise they add up and thus get a cost of 2.
-                    min_cost + 2 * int(old_todo <= new_todo),
+                    min_cost + 200 * int(old_todo <= new_todo),
                     2,
                     old_index + 1,
                     new_index,
@@ -396,7 +396,7 @@ def diff_lines_base(old: list[str], new: list[str]) -> list[Line]:
                     # If we have more new_todo than old_todo the change to
                     # the heuristic and the cost cancel eachother out,
                     # otherwise they add up and thus get a cost of 2.
-                    min_cost + 2 * int(new_todo <= old_todo),
+                    min_cost + 200 * int(new_todo <= old_todo),
                     1,
                     old_index,
                     new_index + 1,
@@ -413,7 +413,7 @@ def diff_lines_base(old: list[str], new: list[str]) -> list[Line]:
                 heapq.heappush(
                     states,
                     (
-                        min_cost + (1 - similarity),
+                        min_cost + (100 - round(similarity * 100)),
                         0,
                         old_index + 1,
                         new_index + 1,
