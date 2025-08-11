@@ -12,18 +12,27 @@ dependencies = []
 [project.scripts]
 jjdiff = "jjdiff:main"
 
-[tool.pyright]
-venvPath = "."
-venv = ".venv"
-reportUnusedCallResult = false
-
 [build-system]
 requires = ["uv_build>=0.8.0,<0.9"]
 build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "mypy>=1.17.0",
+    "poethepoet>=0.37.0",
+    "pyright>=1.1.403",
     "pytest>=8.4.1",
     "ruff>=0.12.5",
 ]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+reportUnusedCallResult = false
+
+[tool.poe.tasks]
+lint = "ruff check"
+format = "ruff format"
+"format:check" = "ruff format --check"
+typecheck = "pyright"
+test = "pytest"
+check = ["lint", "format", "typecheck", "test"]
