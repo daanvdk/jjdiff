@@ -169,19 +169,18 @@ class HunkCursor(Cursor):
                     break
                 end -= 1
             else:
-                # No hunk found, so go to the previous file change and
-                # try again
+                # No hunk found, so go to the previous file change and try
+                # again
                 while True:
                     change_index = (change_index - 1) % len(changes)
+                    if ChangeRef(change_index) not in opened:
+                        continue
+
                     prev_change = changes[change_index]
-                    if ChangeRef(change_index) in opened and isinstance(
-                        prev_change, FILE_CHANGE_TYPES
-                    ):
-                        change = prev_change
+                    if isinstance(prev_change, FILE_CHANGE_TYPES):
                         break
 
-                start = len(change.lines)
-                end = len(change.lines)
+                start = len(prev_change.lines)
                 continue
 
             # Find the start of the hunk
@@ -207,19 +206,17 @@ class HunkCursor(Cursor):
                     break
                 start += 1
             else:
-                # No hunk found, so go to the previous file change and
-                # try again
+                # No hunk found, so go to the next file change and try again
                 while True:
                     change_index = (change_index + 1) % len(changes)
+                    if ChangeRef(change_index) not in opened:
+                        continue
+
                     next_change = changes[change_index]
-                    if ChangeRef(change_index) in opened and isinstance(
-                        next_change, FILE_CHANGE_TYPES
-                    ):
-                        change = next_change
+                    if isinstance(next_change, FILE_CHANGE_TYPES):
                         break
 
-                start = len(change.lines)
-                end = len(change.lines)
+                end = 0
                 continue
 
             # Find the start of the hunk
@@ -280,18 +277,18 @@ class LineCursor(Cursor):
                 if change.lines[line].status != "unchanged":
                     break
             else:
-                # No line found, so go to the previous file change and
-                # try again
+                # No line found, so go to the previous file change and try
+                # again
                 while True:
                     change_index = (change_index - 1) % len(changes)
+                    if ChangeRef(change_index) not in opened:
+                        continue
+
                     prev_change = changes[change_index]
-                    if ChangeRef(change_index) in opened and isinstance(
-                        prev_change, FILE_CHANGE_TYPES
-                    ):
-                        change = prev_change
+                    if isinstance(prev_change, FILE_CHANGE_TYPES):
                         break
 
-                line = len(change.lines)
+                line = len(prev_change.lines)
                 continue
 
             return LineCursor(change_index, line)
@@ -310,15 +307,15 @@ class LineCursor(Cursor):
                 if change.lines[line].status != "unchanged":
                     break
             else:
-                # No line found, so go to the previous file change and
-                # try again
+                # No line found, so go to the previous file change and try
+                # again
                 while True:
                     change_index = (change_index + 1) % len(changes)
+                    if ChangeRef(change_index) not in opened:
+                        continue
+
                     next_change = changes[change_index]
-                    if ChangeRef(change_index) in opened and isinstance(
-                        next_change, FILE_CHANGE_TYPES
-                    ):
-                        change = next_change
+                    if isinstance(next_change, FILE_CHANGE_TYPES):
                         break
 
                 line = -1
