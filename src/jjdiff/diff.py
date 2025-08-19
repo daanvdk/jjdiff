@@ -7,7 +7,7 @@ from pathlib import Path
 import stat
 from typing import override
 
-from jjdiff.change import (
+from .change import (
     Change,
     Rename,
     ChangeMode,
@@ -22,6 +22,7 @@ from jjdiff.change import (
     DeleteSymlink,
     Line,
 )
+from .config import path_deprioritized
 
 
 SIMILARITY_THRESHOLD = 0.6
@@ -114,7 +115,8 @@ def diff_contents(
             added[path] = new_content
             continue
 
-        changes.extend(diff_content(path, old_content, new_content))
+        is_deprioritized = path_deprioritized(path)
+        changes.extend(diff_content(path, old_content, new_content, is_deprioritized))
 
     # Now we look for all paths that are in old but not in new
     deleted: dict[Path, Content] = {}
@@ -133,6 +135,7 @@ def diff_contents(
         if similarity >= SIMILARITY_THRESHOLD:
             heapq.heappush(renames, (-similarity, old_path, new_path))
 
+    renamed: dict[Path, Path] = {}
     while renames:
         _, old_path, new_path = heapq.heappop(renames)
 
@@ -143,58 +146,70 @@ def diff_contents(
         old_content = deleted.pop(old_path)
         new_content = added.pop(new_path)
 
-        changes.append(Rename(old_path, new_path))
-        changes.extend(diff_content(old_path, old_content, new_content))
+        is_deprioritized = path_deprioritized(new_path)
+        changes.append(Rename(old_path, new_path, is_deprioritized))
+        changes.extend(
+            diff_content(old_path, old_content, new_content, is_deprioritized)
+        )
+        renamed[old_path] = new_path
 
     # All the rest we can delete/add
     for path, content in deleted.items():
-        changes.append(delete_content(path, content))
+        is_deprioritized = path_deprioritized(path)
+        changes.append(delete_content(path, content, is_deprioritized))
+
     for path, content in added.items():
-        changes.append(add_content(path, content))
+        is_deprioritized = path_deprioritized(path)
+        changes.append(add_content(path, content, is_deprioritized))
 
     changes.sort(key=change_key)
     return changes
 
 
-def change_key(change: Change) -> tuple[Path, int]:
+def change_key(change: Change) -> tuple[bool, Path, int]:
     match change:
         case Rename(path):
-            return (path, 0)
+            priority = 0
         case ChangeMode(path):
-            return (path, 1)
+            priority = 1
         case DeleteFile(path) | DeleteBinary(path) | DeleteSymlink(path):
-            return (path, 2)
+            priority = 2
         case ModifyFile(path) | ModifyBinary(path) | ModifySymlink(path):
-            return (path, 3)
+            priority = 3
         case AddFile(path) | AddBinary(path) | AddSymlink(path):
-            return (path, 4)
+            priority = 4
+
+    return (change.is_deprioritized, path, priority)
 
 
 def diff_content(
     path: Path,
     old_content: Content,
     new_content: Content,
+    is_deprioritized: bool,
 ) -> Iterator[Change]:
     match old_content, new_content:
         case File(old_lines, old_is_exec), File(new_lines, new_is_exec):
             if old_is_exec != new_is_exec:
-                yield ChangeMode(path, old_is_exec, new_is_exec)
+                yield ChangeMode(path, old_is_exec, new_is_exec, is_deprioritized)
             if old_lines != new_lines:
-                yield ModifyFile(path, diff_lines(old_lines, new_lines))
+                yield ModifyFile(
+                    path, diff_lines(old_lines, new_lines), is_deprioritized
+                )
 
         case Binary(old_data, old_is_exec), Binary(new_data, new_is_exec):
             if old_is_exec != new_is_exec:
-                yield ChangeMode(path, old_is_exec, new_is_exec)
+                yield ChangeMode(path, old_is_exec, new_is_exec, is_deprioritized)
             if old_data != new_data:
-                yield ModifyBinary(path, old_data, new_data)
+                yield ModifyBinary(path, old_data, new_data, is_deprioritized)
 
         case Symlink(old_to), Symlink(new_to):
             if old_to != new_to:
-                yield ModifySymlink(path, old_to, new_to)
+                yield ModifySymlink(path, old_to, new_to, is_deprioritized)
 
         case _:
-            yield delete_content(path, old_content)
-            yield add_content(path, new_content)
+            yield delete_content(path, old_content, is_deprioritized)
+            yield add_content(path, new_content, is_deprioritized)
 
 
 def get_content_similarity(old_content: Content, new_content: Content) -> float:
@@ -209,24 +224,28 @@ def get_content_similarity(old_content: Content, new_content: Content) -> float:
             return 0
 
 
-def delete_content(path: Path, content: Content) -> Change:
+def delete_content(path: Path, content: Content, is_deprioritized: bool) -> Change:
     match content:
         case File(lines, is_exec):
-            return DeleteFile(path, [Line(line, None) for line in lines], is_exec)
+            return DeleteFile(
+                path, [Line(line, None) for line in lines], is_exec, is_deprioritized
+            )
         case Binary(data, is_exec):
-            return DeleteBinary(path, data, is_exec)
+            return DeleteBinary(path, data, is_exec, is_deprioritized)
         case Symlink(to):
-            return DeleteSymlink(path, to)
+            return DeleteSymlink(path, to, is_deprioritized)
 
 
-def add_content(path: Path, content: Content) -> Change:
+def add_content(path: Path, content: Content, is_deprioritized: bool) -> Change:
     match content:
         case File(lines, is_exec):
-            return AddFile(path, [Line(None, line) for line in lines], is_exec)
+            return AddFile(
+                path, [Line(None, line) for line in lines], is_exec, is_deprioritized
+            )
         case Binary(data, is_exec):
-            return AddBinary(path, data, is_exec)
+            return AddBinary(path, data, is_exec, is_deprioritized)
         case Symlink(to):
-            return AddSymlink(path, to)
+            return AddSymlink(path, to, is_deprioritized)
 
 
 def get_similarity[T](old: Sequence[T], new: Sequence[T]) -> float:

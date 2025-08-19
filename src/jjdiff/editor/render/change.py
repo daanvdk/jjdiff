@@ -25,6 +25,7 @@ from ..cursor import Cursor
 from .change_title import render_change_title
 from .change_file import render_change_file
 from .change_binary import render_change_binary
+from .change_deprioritized import render_change_deprioritized
 
 
 type ChangeIncluded = Literal["full", "partial", "none"]
@@ -82,7 +83,13 @@ def render_change(
             )
 
         case AddFile(_, lines) | ModifyFile(_, lines) | DeleteFile(_, lines):
-            drawables.append(render_change_file(change_index, lines, cursor, included))
+            # Hide change for deprioritized files in print mode
+            if cursor is None and change.is_deprioritized:
+                drawables.append(render_change_deprioritized(change_index, cursor))
+            else:
+                drawables.append(
+                    render_change_file(change_index, lines, cursor, included)
+                )
 
         case AddBinary() | ModifyBinary() | DeleteBinary():
             drawables.append(render_change_binary(change_index, cursor))
