@@ -54,7 +54,7 @@ def test_diff_files_add() -> None:
     }
 
     assert diff_contents(old_contents, new_contents) == [
-        AddFile(Path("foo.txt"), [Line(None, "foo")], False),
+        AddFile(Path("foo.txt"), [Line(None, "foo")], False, False),
     ]
 
 
@@ -65,7 +65,7 @@ def test_diff_files_delete() -> None:
     new_contents: dict[Path, Content] = {}
 
     assert diff_contents(old_contents, new_contents) == [
-        DeleteFile(Path("foo.txt"), [Line("foo", None)], False),
+        DeleteFile(Path("foo.txt"), [Line("foo", None)], False, False),
     ]
 
 
@@ -78,7 +78,7 @@ def test_diff_files_modify() -> None:
     }
 
     assert diff_contents(old_contents, new_contents) == [
-        ModifyFile(Path("foo.txt"), [Line("foo", None), Line(None, "bar")]),
+        ModifyFile(Path("foo.txt"), [Line("foo", None), Line(None, "bar")], False),
     ]
 
 
@@ -91,7 +91,7 @@ def test_diff_files_modify_similar() -> None:
     }
 
     assert diff_contents(old_contents, new_contents) == [
-        ModifyFile(Path("bar.txt"), [Line("bar", "baz")]),
+        ModifyFile(Path("bar.txt"), [Line("bar", "baz")], False),
     ]
 
 
@@ -104,5 +104,5 @@ def test_diff_files_modify_is_exec() -> None:
     }
 
     assert diff_contents(old_contents, new_contents) == [
-        ChangeMode(Path("foo.txt"), False, True),
+        ChangeMode(Path("foo.txt"), False, True, False),
     ]

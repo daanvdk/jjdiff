@@ -29,6 +29,7 @@ class Line:
 class Rename:
     old_path: Path
     new_path: Path
+    is_deprioritized: bool
 
 
 @dataclass
@@ -36,6 +37,7 @@ class ChangeMode:
     path: Path
     old_is_exec: bool
     new_is_exec: bool
+    is_deprioritized: bool
 
 
 @dataclass
@@ -43,12 +45,14 @@ class AddFile:
     path: Path
     lines: list[Line]
     is_exec: bool
+    is_deprioritized: bool
 
 
 @dataclass
 class ModifyFile:
     path: Path
     lines: list[Line]
+    is_deprioritized: bool
 
 
 @dataclass
@@ -56,6 +60,7 @@ class DeleteFile:
     path: Path
     lines: list[Line]
     is_exec: bool
+    is_deprioritized: bool
 
 
 @dataclass
@@ -63,6 +68,7 @@ class AddBinary:
     path: Path
     data: bytes
     is_exec: bool
+    is_deprioritized: bool
 
 
 @dataclass
@@ -70,6 +76,7 @@ class ModifyBinary:
     path: Path
     old_data: bytes
     new_data: bytes
+    is_deprioritized: bool
 
 
 @dataclass
@@ -77,12 +84,14 @@ class DeleteBinary:
     path: Path
     data: bytes
     is_exec: bool
+    is_deprioritized: bool
 
 
 @dataclass
 class AddSymlink:
     path: Path
     to: Path
+    is_deprioritized: bool
 
 
 @dataclass
@@ -90,12 +99,14 @@ class ModifySymlink:
     path: Path
     old_to: Path
     new_to: Path
+    is_deprioritized: bool
 
 
 @dataclass
 class DeleteSymlink:
     path: Path
     to: Path
+    is_deprioritized: bool
 
 
 type FileChange = AddFile | ModifyFile | DeleteFile
@@ -115,48 +126,48 @@ def reverse_changes(changes: Sequence[Change]) -> Iterator[Change]:
 
     for change in reversed(changes):
         match change:
-            case Rename(old_path, new_path):
-                yield Rename(new_path, old_path)
+            case Rename(old_path, new_path, is_deprioritized):
+                yield Rename(new_path, old_path, is_deprioritized)
 
-            case ChangeMode(path, old_is_exec, new_is_exec):
+            case ChangeMode(path, old_is_exec, new_is_exec, is_deprioritized):
                 path = renames.get(path, path)
-                yield ChangeMode(path, new_is_exec, old_is_exec)
+                yield ChangeMode(path, new_is_exec, old_is_exec, is_deprioritized)
 
-            case AddFile(path, lines, is_exec):
+            case AddFile(path, lines, is_exec, is_deprioritized):
                 path = renames.get(path, path)
-                yield DeleteFile(path, reverse_lines(lines), is_exec)
+                yield DeleteFile(path, reverse_lines(lines), is_exec, is_deprioritized)
 
-            case ModifyFile(path, lines):
+            case ModifyFile(path, lines, is_deprioritized):
                 path = renames.get(path, path)
-                yield ModifyFile(path, reverse_lines(lines))
+                yield ModifyFile(path, reverse_lines(lines), is_deprioritized)
 
-            case DeleteFile(path, lines, is_exec):
+            case DeleteFile(path, lines, is_exec, is_deprioritized):
                 path = renames.get(path, path)
-                yield AddFile(path, reverse_lines(lines), is_exec)
+                yield AddFile(path, reverse_lines(lines), is_exec, is_deprioritized)
 
-            case AddBinary(path, data, is_exec):
+            case AddBinary(path, data, is_exec, is_deprioritized):
                 path = renames.get(path, path)
-                yield DeleteBinary(path, data, is_exec)
+                yield DeleteBinary(path, data, is_exec, is_deprioritized)
 
-            case ModifyBinary(path, old_data, new_data):
+            case ModifyBinary(path, old_data, new_data, is_deprioritized):
                 path = renames.get(path, path)
-                yield ModifyBinary(path, new_data, old_data)
+                yield ModifyBinary(path, new_data, old_data, is_deprioritized)
 
-            case DeleteBinary(path, data, is_exec):
+            case DeleteBinary(path, data, is_exec, is_deprioritized):
                 path = renames.get(path, path)
-                yield AddBinary(path, data, is_exec)
+                yield AddBinary(path, data, is_exec, is_deprioritized)
 
-            case AddSymlink(path, to):
+            case AddSymlink(path, to, is_deprioritized):
                 path = renames.get(path, path)
-                yield DeleteSymlink(path, to)
+                yield DeleteSymlink(path, to, is_deprioritized)
 
-            case ModifySymlink(path, old_to, new_to):
+            case ModifySymlink(path, old_to, new_to, is_deprioritized):
                 path = renames.get(path, path)
-                yield ModifySymlink(path, new_to, old_to)
+                yield ModifySymlink(path, new_to, old_to, is_deprioritized)
 
-            case DeleteSymlink(path, to):
+            case DeleteSymlink(path, to, is_deprioritized):
                 path = renames.get(path, path)
-                yield AddSymlink(path, to)
+                yield AddSymlink(path, to, is_deprioritized)
 
 
 def reverse_lines(lines: list[Line]) -> list[Line]:
@@ -204,19 +215,19 @@ def filter_changes(
 
         # Now we can check what the filtered change looks like
         match change:
-            case AddFile(path, _, is_exec):
+            case AddFile(path, _, is_exec, is_deprioritized):
                 if change_ref in refs:
-                    yield AddFile(path, lines, is_exec)
+                    yield AddFile(path, lines, is_exec, is_deprioritized)
 
-            case ModifyFile(path):
+            case ModifyFile(path, _, is_deprioritized):
                 if line_changes:
-                    yield ModifyFile(path, lines)
+                    yield ModifyFile(path, lines, is_deprioritized)
 
-            case DeleteFile(path, _, is_exec):
+            case DeleteFile(path, _, is_exec, is_deprioritized):
                 if change_ref in refs:
-                    yield DeleteFile(path, lines, is_exec)
+                    yield DeleteFile(path, lines, is_exec, is_deprioritized)
                 elif line_changes:
-                    yield ModifyFile(path, lines)
+                    yield ModifyFile(path, lines, is_deprioritized)
 
 
 def apply_changes(root: Path, changes: Iterable[Change]) -> None:
