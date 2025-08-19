@@ -7,7 +7,9 @@ authors = [
     { name = "Daan van der Kallen", email = "mail@daanvdk.com" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "pydantic>=2.11.7",
+]
 
 [project.scripts]
 jjdiff = "jjdiff:main"
