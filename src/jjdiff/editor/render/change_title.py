@@ -7,6 +7,7 @@ from jjdiff.tui.text import Text, TextColor, TextStyle
 
 
 from ...change import (
+    FILE_CHANGE_TYPES,
     AddBinary,
     AddFile,
     AddSymlink,
@@ -106,6 +107,8 @@ def render_change_title(
                     Text("\u258c", TextStyle(fg=fg, bg=bg)),
                 ]
             )
+            bold = True
+
         case "partial":
             action_text = Text.join(
                 [
@@ -113,25 +116,55 @@ def render_change_title(
                     Text("\u258c", TextStyle(fg=fg, bg=bg)),
                 ]
             )
+            bold = True
+
         case "none":
             action_text = Text(f"\u258c\u2717 {action} ", TextStyle(fg=fg, bg=bg))
+            bold = False
+
         case None:
             action_text = Text(f"\u258c {action} ", TextStyle(fg=fg, bg=bg))
+            bold = False
 
     texts = [
         action_text,
-        Text(f"{file_type} ", TextStyle(bg=bg, bold=included != "none")),
-        Text(str(path), TextStyle(fg="blue", bg=bg, bold=included != "none")),
+        Text(f"{file_type} ", TextStyle(bg=bg, bold=bold)),
+        Text(str(path), TextStyle(fg="blue", bg=bg, bold=bold)),
     ]
 
     if isinstance(change, Rename):
-        texts.append(Text(" to ", TextStyle(bg=bg, bold=included != "none")))
+        texts.append(Text(" to ", TextStyle(bg=bg, bold=bold)))
         texts.append(
             Text(
                 str(change.new_path),
-                TextStyle(fg="blue", bg=bg, bold=included != "none"),
+                TextStyle(fg="blue", bg=bg, bold=bold),
             )
         )
+
+    if isinstance(change, FILE_CHANGE_TYPES):
+        added = 0
+        deleted = 0
+
+        for line in change.lines:
+            match line.status:
+                case "added":
+                    added += 1
+                case "changed":
+                    added += 1
+                    deleted += 1
+                case "deleted":
+                    deleted += 1
+                case "unchanged":
+                    pass
+
+        if added:
+            texts.append(
+                Text(f" +{added}", style=TextStyle(bold=True, bg=bg, fg="green"))
+            )
+        if deleted:
+            texts.append(
+                Text(f" -{deleted}", style=TextStyle(bold=True, bg=bg, fg="red"))
+            )
 
     title = Text.join(texts)
     if selected:
