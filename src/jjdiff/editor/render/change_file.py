@@ -1,5 +1,6 @@
 from difflib import SequenceMatcher
 
+from jjdiff.config import load_config
 from jjdiff.tui.drawable import Drawable
 from jjdiff.tui.rows import Rows
 from jjdiff.tui.fill import Fill
@@ -261,9 +262,14 @@ def render_line_content(
     index = 0
 
     for start, end in underline:
-        texts.append(Text(content[index:start], style))
-        texts.append(Text(content[start:end], underlined_style))
+        texts.append(Text(normalize_text(content[index:start]), style))
+        texts.append(Text(normalize_text(content[start:end]), underlined_style))
         index = end
-    texts.append(Text(content[index:], style))
+    texts.append(Text(normalize_text(content[index:]), style))
 
     return Text.join(texts)
+
+
+def normalize_text(line: str) -> str:
+    tab_repl = " " * load_config().format.tab_width
+    return line.replace("\r", "").replace("\t", tab_repl)

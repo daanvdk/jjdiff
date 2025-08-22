@@ -10,8 +10,13 @@ class DiffConfig(BaseModel):
     deprioritize: list[str] = []
 
 
+class FormatConfig(BaseModel):
+    tab_width: int = 4
+
+
 class Config(BaseModel):
     diff: DiffConfig = DiffConfig()
+    format: FormatConfig = FormatConfig()
 
 
 def get_config_path() -> Path:
