@@ -20,7 +20,6 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "poethepoet>=0.37.0",
     "pyright>=1.1.403",
     "pytest>=8.4.1",
     "ruff>=0.12.5",
