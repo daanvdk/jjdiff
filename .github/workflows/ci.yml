@@ -21,18 +21,21 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Install poe
+        run: uv tool install poethepoet
+
       - name: Install dependencies
         run: uv sync --locked
 
       - name: Lint
-        run: uv run poe lint
+        run: poe lint
 
       - name: Check formatting
-        run: uv run poe format:check
+        run: poe format:check
 
       - name: Check types
-        run: uv run poe typecheck
+        run: poe typecheck
 
       - name: Test
-        run: uv run poe test
+        run: poe test
 
