@@ -242,6 +242,7 @@ def apply_change(root: Path, change: Change) -> None:
         case Rename(old_path, new_path):
             full_old_path = root / old_path
             full_new_path = root / new_path
+            full_new_path.mkdir(exist_ok=True, parents=True)
             full_old_path.rename(full_new_path)
 
         case ChangeMode(path, _, is_exec):
