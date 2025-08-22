@@ -1,6 +1,6 @@
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
-from typing import Literal, override
+from typing import Literal, overload, override
 
 from .drawable import Drawable
 
@@ -135,12 +135,26 @@ class TextSpan:
     content: str
     style: TextStyle
 
+    def __post_init__(self) -> None:
+        assert "\t" not in self.content
+        assert "\r" not in self.content
+
 
 class Text(Drawable):
     spans: tuple[TextSpan, ...]
 
-    def __init__(self, content: str = "", style: TextStyle = DEFAULT_TEXT_STYLE):
-        self.spans = (TextSpan(normalize(content), style),)
+    @overload
+    def __init__(self, content: str = "", style: TextStyle | None = None) -> None: ...
+    @overload
+    def __init__(self, content: tuple[TextSpan, ...]) -> None: ...
+    def __init__(
+        self,
+        content: str | tuple[TextSpan, ...] = "",
+        style: TextStyle | None = None,
+    ) -> None:
+        if isinstance(content, str):
+            content = (TextSpan(content, style or DEFAULT_TEXT_STYLE),)
+        self.spans = content
 
     def __add__(self, other: "Text") -> "Text":
         return Text.join([self, other])
@@ -157,9 +171,7 @@ class Text(Drawable):
                 spans.extend(joiner.spans)
             spans.extend(text.spans)
 
-        result = Text()
-        result.spans = tuple(spans)
-        return result
+        return Text(tuple(spans))
 
     @override
     def base_width(self) -> int:
@@ -247,7 +259,3 @@ class Text(Drawable):
                         return
 
         yield get_line()
-
-
-def normalize(content: str) -> str:
-    return content.replace("\r", "").replace("\t", "    ")
