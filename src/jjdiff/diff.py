@@ -413,7 +413,10 @@ def diff_lines_base(old: list[str], new: list[str]) -> list[Line]:
                 heapq.heappush(
                     states,
                     (
-                        min_cost + (100 - round(similarity * 100)),
+                        # The cost scales with the similarity
+                        # similarity 0 -> cost 200 (same as deletion + addition)
+                        # similarity 1 -> cost   0 (no change)
+                        min_cost + (200 - round(similarity * 200)),
                         0,
                         old_index + 1,
                         new_index + 1,
