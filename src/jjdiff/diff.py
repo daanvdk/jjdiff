@@ -246,20 +246,17 @@ def diff_content(
 
 
 def content_is_equal(old_content: Path, new_content: Path) -> bool:
-    old_len = old_content.stat().st_size
-    new_len = new_content.stat().st_size
-
     # Different size is never equal
-    if old_len != new_len:
+    if old_content.stat().st_size != new_content.stat().st_size:
         return False
 
     # Compare content through mmap
     with (
         old_content.open("rb") as old_file,
         new_content.open("rb") as new_file,
+        mmap.mmap(old_file.fileno(), 0, access=mmap.ACCESS_READ) as old_data,
+        mmap.mmap(new_file.fileno(), 0, access=mmap.ACCESS_READ) as new_data,
     ):
-        old_data = mmap.mmap(old_file.fileno(), old_len, access=mmap.ACCESS_READ)
-        new_data = mmap.mmap(new_file.fileno(), new_len, access=mmap.ACCESS_READ)
         return old_data == new_data
 
 
@@ -347,36 +344,42 @@ HASH_MODULUS = (1 << 31) - 1
 HASH_BASE_POWER = pow(HASH_BASE, WINDOW_SIZE, HASH_MODULUS)
 
 
-def get_binary_chunks(path: Path) -> Iterator[bytes]:
-    data = path.read_bytes()
+def get_binary_chunks(path: Path) -> Iterator[memoryview]:
+    with (
+        path.open("rb") as file,
+        mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as raw_data,
+    ):
+        # Wrap in memory view for zero copy chunks
+        data = memoryview(raw_data)
 
-    if len(data) <= WINDOW_SIZE:
-        yield data
-        return
+        if len(data) <= WINDOW_SIZE:
+            yield data
+            return
 
-    curr_hash = 0
-    for i in range(WINDOW_SIZE):
-        curr_hash = (curr_hash * HASH_BASE + data[i]) % HASH_MODULUS
+        curr_hash = 0
+        for i in range(WINDOW_SIZE):
+            curr_hash = (curr_hash * HASH_BASE + data[i]) % HASH_MODULUS
 
-    start = 0
-    for i in range(WINDOW_SIZE, len(data)):
-        if curr_hash & WINDOW_MASK == 0:
-            yield data[start:i]
-            start = i
+        start = 0
+        for i in range(WINDOW_SIZE, len(data)):
+            if curr_hash & WINDOW_MASK == 0:
+                chunk = data[start:i]
+                yield chunk
+                start = i
 
-        old_byte = data[i - WINDOW_SIZE]
-        new_byte = data[i]
+            old_byte = data[i - WINDOW_SIZE]
+            new_byte = data[i]
 
-        curr_hash = (
-            curr_hash - (old_byte * HASH_BASE_POWER) % HASH_MODULUS
-        ) % HASH_MODULUS
-        curr_hash = (curr_hash * HASH_BASE + new_byte) % HASH_MODULUS
+            curr_hash = (
+                curr_hash - (old_byte * HASH_BASE_POWER) % HASH_MODULUS
+            ) % HASH_MODULUS
+            curr_hash = (curr_hash * HASH_BASE + new_byte) % HASH_MODULUS
 
-    if start < len(data):
-        yield data[start:]
+        if start < len(data):
+            yield data[start:]
 
 
-def stable_hash(data: bytes) -> bytes:
+def stable_hash(data: memoryview) -> bytes:
     return hashlib.blake2b(data, digest_size=8).digest()
 
 
