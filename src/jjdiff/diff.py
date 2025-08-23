@@ -8,6 +8,7 @@ from itertools import product
 from pathlib import Path
 import stat
 from typing import override
+import mmap
 
 from .change import (
     Change,
@@ -32,13 +33,7 @@ SIMILARITY_THRESHOLD = 0.6
 
 @dataclass
 class File:
-    lines: list[str]
-    is_exec: bool
-
-
-@dataclass
-class Binary:
-    data: bytes
+    content_path: Path
     is_exec: bool
 
 
@@ -47,7 +42,7 @@ class Symlink:
     to: Path
 
 
-type Content = File | Binary | Symlink
+type Content = File | Symlink
 
 
 def diff(old_root: Path, new_root: Path) -> list[Change]:
@@ -85,18 +80,11 @@ class Contents(Mapping[Path, Content]):
         except ValueError:
             raise KeyError(path)
 
-        if full_path.is_symlink():
+        if full_path.is_symlink():  # Symlink has to come first
             return Symlink(full_path.readlink())
-
         elif full_path.is_file():
             is_exec = bool(full_path.stat().st_mode & stat.S_IXUSR)
-            try:
-                text = full_path.read_text()
-            except ValueError:
-                return Binary(full_path.read_bytes(), is_exec)
-            else:
-                return File(text.split("\n"), is_exec)
-
+            return File(full_path, is_exec)
         else:
             raise KeyError(full_path)
 
@@ -188,19 +176,65 @@ def diff_content(
     is_deprioritized: bool,
 ) -> Iterator[Change]:
     match old_content, new_content:
-        case File(old_lines, old_is_exec), File(new_lines, new_is_exec):
-            if old_is_exec != new_is_exec:
-                yield ChangeMode(path, old_is_exec, new_is_exec, is_deprioritized)
-            if old_lines != new_lines:
-                yield ModifyFile(
-                    path, diff_lines(old_lines, new_lines), is_deprioritized
-                )
+        case File(old_content_path, old_is_exec), File(new_content_path, new_is_exec):
+            if content_is_equal(old_content_path, new_content_path):
+                return
 
-        case Binary(old_data, old_is_exec), Binary(new_data, new_is_exec):
-            if old_is_exec != new_is_exec:
-                yield ChangeMode(path, old_is_exec, new_is_exec, is_deprioritized)
-            if old_data != new_data:
-                yield ModifyBinary(path, old_data, new_data, is_deprioritized)
+            match split_lines(old_content_path), split_lines(new_content_path):
+                case list(old_lines), list(new_lines):
+                    if old_is_exec != new_is_exec:
+                        yield ChangeMode(
+                            path,
+                            old_is_exec,
+                            new_is_exec,
+                            is_deprioritized,
+                        )
+                    lines = diff_lines(old_lines, new_lines)
+                    if any(line.status != "unchanged" for line in lines):
+                        yield ModifyFile(path, lines, is_deprioritized)
+
+                case None, None:
+                    if old_is_exec != new_is_exec:
+                        yield ChangeMode(
+                            path,
+                            old_is_exec,
+                            new_is_exec,
+                            is_deprioritized,
+                        )
+                    yield ModifyBinary(
+                        path,
+                        old_content_path.read_bytes(),
+                        new_content_path.read_bytes(),
+                        is_deprioritized,
+                    )
+
+                case list(old_lines), None:
+                    yield DeleteFile(
+                        path,
+                        [Line(line, None) for line in old_lines],
+                        old_is_exec,
+                        is_deprioritized,
+                    )
+                    yield AddBinary(
+                        path,
+                        new_content_path.read_bytes(),
+                        new_is_exec,
+                        is_deprioritized,
+                    )
+
+                case None, list(new_lines):
+                    yield DeleteBinary(
+                        path,
+                        old_content_path.read_bytes(),
+                        old_is_exec,
+                        is_deprioritized,
+                    )
+                    yield AddFile(
+                        path,
+                        [Line(None, line) for line in new_lines],
+                        new_is_exec,
+                        is_deprioritized,
+                    )
 
         case Symlink(old_to), Symlink(new_to):
             if old_to != new_to:
@@ -211,16 +245,63 @@ def diff_content(
             yield add_content(path, new_content, is_deprioritized)
 
 
+def content_is_equal(old_content: Path, new_content: Path) -> bool:
+    old_len = old_content.stat().st_size
+    new_len = new_content.stat().st_size
+
+    # Different size is never equal
+    if old_len != new_len:
+        return False
+
+    # Compare content through mmap
+    with (
+        old_content.open("rb") as old_file,
+        new_content.open("rb") as new_file,
+    ):
+        old_data = mmap.mmap(old_file.fileno(), old_len, access=mmap.ACCESS_READ)
+        new_data = mmap.mmap(new_file.fileno(), new_len, access=mmap.ACCESS_READ)
+        return old_data == new_data
+
+
 def get_content_similarity(old_content: Content, new_content: Content) -> float:
     match old_content, new_content:
-        case File(old_lines), File(new_lines):
-            return get_text_similarity(old_lines, new_lines)
-        case Binary(old_data), Binary(new_data):
-            return get_binary_similarity(old_data, new_data)
-        case Symlink(old_to), Binary(new_to):
+        case File(old_content_path), File(new_content_path):
+            if content_is_equal(old_content_path, new_content_path):
+                return 1
+
+            match split_lines(old_content_path), split_lines(new_content_path):
+                case list(old_lines), list(new_lines):
+                    return get_text_similarity(old_lines, new_lines)
+                case None, None:
+                    return get_binary_similarity(old_content_path, new_content_path)
+                case _:
+                    return 0
+
+        case Symlink(old_to), Symlink(new_to):
             return get_line_similarity(str(old_to), str(new_to))
+
         case _:
             return 0
+
+
+def split_lines(path: Path) -> list[str] | None:
+    lines: list[str] = []
+    trailing_newline = True
+
+    try:
+        with path.open("r", newline="") as f:
+            for line in f:
+                trailing_newline = line.endswith("\n")
+                if trailing_newline:
+                    line = line[:-1]
+                lines.append(line)
+    except UnicodeDecodeError:
+        return None
+
+    if trailing_newline:
+        lines.append("")
+
+    return lines
 
 
 def get_text_similarity(old_lines: list[str], new_lines: list[str]) -> float:
@@ -246,9 +327,9 @@ def get_line_counts(lines: list[str]) -> Counter[str]:
     return counts
 
 
-def get_binary_similarity(old_data: bytes, new_data: bytes) -> float:
-    old_chunks = set(map(stable_hash, get_binary_chunks(old_data)))
-    new_chunks = set(map(stable_hash, get_binary_chunks(new_data)))
+def get_binary_similarity(old_content_path: Path, new_content_path: Path) -> float:
+    old_chunks = set(map(stable_hash, get_binary_chunks(old_content_path)))
+    new_chunks = set(map(stable_hash, get_binary_chunks(new_content_path)))
 
     total = len(old_chunks) + len(new_chunks)
     if total == 0:
@@ -266,7 +347,9 @@ HASH_MODULUS = (1 << 31) - 1
 HASH_BASE_POWER = pow(HASH_BASE, WINDOW_SIZE, HASH_MODULUS)
 
 
-def get_binary_chunks(data: bytes) -> Iterator[bytes]:
+def get_binary_chunks(path: Path) -> Iterator[bytes]:
+    data = path.read_bytes()
+
     if len(data) <= WINDOW_SIZE:
         yield data
         return
@@ -299,24 +382,42 @@ def stable_hash(data: bytes) -> bytes:
 
 def delete_content(path: Path, content: Content, is_deprioritized: bool) -> Change:
     match content:
-        case File(lines, is_exec):
-            return DeleteFile(
-                path, [Line(line, None) for line in lines], is_exec, is_deprioritized
-            )
-        case Binary(data, is_exec):
-            return DeleteBinary(path, data, is_exec, is_deprioritized)
+        case File(content_path, is_exec):
+            if lines := split_lines(content_path):
+                return DeleteFile(
+                    path,
+                    [Line(line, None) for line in lines],
+                    is_exec,
+                    is_deprioritized,
+                )
+            else:
+                return DeleteBinary(
+                    path,
+                    content_path.read_bytes(),
+                    is_exec,
+                    is_deprioritized,
+                )
         case Symlink(to):
             return DeleteSymlink(path, to, is_deprioritized)
 
 
 def add_content(path: Path, content: Content, is_deprioritized: bool) -> Change:
     match content:
-        case File(lines, is_exec):
-            return AddFile(
-                path, [Line(None, line) for line in lines], is_exec, is_deprioritized
-            )
-        case Binary(data, is_exec):
-            return AddBinary(path, data, is_exec, is_deprioritized)
+        case File(content_path, is_exec):
+            if lines := split_lines(content_path):
+                return AddFile(
+                    path,
+                    [Line(None, line) for line in lines],
+                    is_exec,
+                    is_deprioritized,
+                )
+            else:
+                return AddBinary(
+                    path,
+                    content_path.read_bytes(),
+                    is_exec,
+                    is_deprioritized,
+                )
         case Symlink(to):
             return AddSymlink(path, to, is_deprioritized)
 

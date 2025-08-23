@@ -1,6 +1,8 @@
 from pathlib import Path
-from jjdiff.diff import Content, File, diff_contents, diff_lines
+from jjdiff.diff import diff, diff_lines
 from jjdiff.change import AddFile, ChangeMode, DeleteFile, Line, ModifyFile
+
+from .types import TempDirFactory, ExecFile
 
 
 def test_diff_lines_empty() -> None:
@@ -43,66 +45,53 @@ def test_diff_lines_changed() -> None:
     assert line2.new == "baz"
 
 
-def test_diff_files_empty() -> None:
-    assert list(diff_contents({}, {})) == []
+def test_diff_files_empty(temp_dir_factory: TempDirFactory) -> None:
+    old_dir = temp_dir_factory({})
+    new_dir = temp_dir_factory({})
+
+    assert list(diff(old_dir, new_dir)) == []
 
 
-def test_diff_files_add() -> None:
-    old_contents: dict[Path, Content] = {}
-    new_contents: dict[Path, Content] = {
-        Path("foo.txt"): File(["foo"], False),
-    }
+def test_diff_files_add(temp_dir_factory: TempDirFactory) -> None:
+    old_dir = temp_dir_factory({})
+    new_dir = temp_dir_factory({"foo.txt": "foo"})
 
-    assert diff_contents(old_contents, new_contents) == [
+    assert diff(old_dir, new_dir) == [
         AddFile(Path("foo.txt"), [Line(None, "foo")], False, False),
     ]
 
 
-def test_diff_files_delete() -> None:
-    old_contents: dict[Path, Content] = {
-        Path("foo.txt"): File(["foo"], False),
-    }
-    new_contents: dict[Path, Content] = {}
+def test_diff_files_delete(temp_dir_factory: TempDirFactory) -> None:
+    old_dir = temp_dir_factory({"foo.txt": "foo"})
+    new_dir = temp_dir_factory({})
 
-    assert diff_contents(old_contents, new_contents) == [
+    assert diff(old_dir, new_dir) == [
         DeleteFile(Path("foo.txt"), [Line("foo", None)], False, False),
     ]
 
 
-def test_diff_files_modify() -> None:
-    old_contents: dict[Path, Content] = {
-        Path("foo.txt"): File(["foo"], False),
-    }
-    new_contents: dict[Path, Content] = {
-        Path("foo.txt"): File(["bar"], False),
-    }
+def test_diff_files_modify(temp_dir_factory: TempDirFactory) -> None:
+    old_dir = temp_dir_factory({"foo.txt": "foo"})
+    new_dir = temp_dir_factory({"foo.txt": "bar"})
 
-    assert diff_contents(old_contents, new_contents) == [
+    assert diff(old_dir, new_dir) == [
         ModifyFile(Path("foo.txt"), [Line("foo", None), Line(None, "bar")], False),
     ]
 
 
-def test_diff_files_modify_similar() -> None:
-    old_contents: dict[Path, Content] = {
-        Path("bar.txt"): File(["bar"], False),
-    }
-    new_contents: dict[Path, Content] = {
-        Path("bar.txt"): File(["baz"], False),
-    }
+def test_diff_files_modify_similar(temp_dir_factory: TempDirFactory) -> None:
+    old_dir = temp_dir_factory({"bar.txt": "bar"})
+    new_dir = temp_dir_factory({"bar.txt": "baz"})
 
-    assert diff_contents(old_contents, new_contents) == [
+    assert diff(old_dir, new_dir) == [
         ModifyFile(Path("bar.txt"), [Line("bar", "baz")], False),
     ]
 
 
-def test_diff_files_modify_is_exec() -> None:
-    old_contents: dict[Path, Content] = {
-        Path("foo.txt"): File(["foo"], False),
-    }
-    new_contents: dict[Path, Content] = {
-        Path("foo.txt"): File(["foo"], True),
-    }
+def test_diff_files_modify_is_exec(temp_dir_factory: TempDirFactory) -> None:
+    old_dir = temp_dir_factory({"foo.txt": "foo"})
+    new_dir = temp_dir_factory({"foo.txt": ExecFile("foo")})
 
-    assert diff_contents(old_contents, new_contents) == [
+    assert diff(old_dir, new_dir) == [
         ChangeMode(Path("foo.txt"), False, True, False),
     ]
