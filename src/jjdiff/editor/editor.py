@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence, Set
 from pathlib import Path
 from typing import override
 
@@ -20,7 +20,6 @@ from ..change import (
     DeleteSymlink,
     Ref,
     LineRef,
-    filter_changes,
 )
 from .cursor import Cursor, ChangeCursor
 from .render.changes import render_changes
@@ -70,7 +69,7 @@ class RemoveIncludes(Action):
         editor.included |= self.refs
 
 
-class Editor(Console[Iterable[Change] | None]):
+class Editor(Console[Set[Ref] | None]):
     changes: Sequence[Change]
 
     included: set[Ref]
@@ -101,7 +100,7 @@ class Editor(Console[Iterable[Change] | None]):
         self.cursor = ChangeCursor(0)
 
         if not changes:
-            self.set_result([])
+            self.set_result(frozenset())
 
     def add_dependencies(self) -> None:
         self.add_delete_add_dependencies()
@@ -277,7 +276,7 @@ class Editor(Console[Iterable[Change] | None]):
         self.rerender()
 
     def confirm(self) -> None:
-        self.set_result(filter_changes(self.included, self.changes))
+        self.set_result(frozenset(self.included))
 
     def apply_action(self, action: Action) -> None:
         self.redo_stack.clear()

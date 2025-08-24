@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 from typing import cast
 
-from .change import apply_changes, reverse_changes
+from .change import apply_changes, reverse_changes, split_changes
 from .diff import diff
 from .editor import Editor
 from .editor.render.changes import render_changes
@@ -20,16 +20,19 @@ def main() -> int:
     old = cast(Path, args.old)
     new = cast(Path, args.new)
 
-    changes = tuple(diff(old, new))
+    old_to_new = tuple(diff(old, new))
 
     if only_print:
-        render_changes(changes, None, None, None).print()
+        render_changes(old_to_new, None, None, None).print()
         return 0
 
-    edited_changes = Editor(changes).run()
-    if edited_changes is None:
+    selection = Editor(old_to_new).run()
+
+    if selection is None:
         return 1
 
-    apply_changes(new, reverse_changes(changes))
-    apply_changes(new, edited_changes)
+    _, selected_to_new = split_changes(old_to_new, selection)
+    new_to_selected = reverse_changes(selected_to_new)
+    apply_changes(new, new_to_selected)
+
     return 0
