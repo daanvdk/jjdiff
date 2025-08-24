@@ -1,5 +1,6 @@
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence, Set
 from dataclasses import dataclass
+import dataclasses
 from pathlib import Path
 import stat
 from typing import Literal
@@ -118,16 +119,14 @@ type Change = Rename | ChangeMode | FileChange | BinaryChange | SymlinkChange
 FILE_CHANGE_TYPES = (AddFile, ModifyFile, DeleteFile)
 
 
-def reverse_changes(changes: Sequence[Change]) -> Iterator[Change]:
+def reverse_changes(changes: Iterable[Change]) -> Iterator[Change]:
     renames: dict[Path, Path] = {}
-    for change in changes:
-        if isinstance(change, Rename):
-            renames[change.old_path] = change.new_path
 
-    for change in reversed(changes):
+    for change in changes:
         match change:
             case Rename(old_path, new_path, is_deprioritized):
                 yield Rename(new_path, old_path, is_deprioritized)
+                renames[old_path] = new_path
 
             case ChangeMode(path, old_is_exec, new_is_exec, is_deprioritized):
                 path = renames.get(path, path)
@@ -188,46 +187,136 @@ class LineRef:
 type Ref = ChangeRef | LineRef
 
 
-def filter_changes(
-    refs: set[Ref],
+def split_changes(
     changes: Iterable[Change],
-) -> Iterator[Change]:
+    refs: Set[Ref],
+) -> tuple[Sequence[Change], Sequence[Change]]:
+    old_to_selected: list[Change] = []
+    selected_to_new: list[Change] = []
+    renames: dict[Path, Path] = {}
+
     for change_index, change in enumerate(changes):
         change_ref = ChangeRef(change_index)
 
         # For non file changes we just include the whole change or not
         if not isinstance(change, FILE_CHANGE_TYPES):
             if change_ref in refs:
-                yield change
+                old_to_selected.append(change)
+                if isinstance(change, Rename):
+                    renames[change.old_path] = change.new_path
+            else:
+                if isinstance(change, Rename):
+                    old_path = renames.get(change.old_path, change.old_path)
+                    change = dataclasses.replace(change, old_path=old_path)
+                else:
+                    path = renames.get(change.path, change.path)
+                    change = dataclasses.replace(change, path=path)
+                selected_to_new.append(change)
             continue
 
         # Now that we know we have a file change, we first filter the lines
-        lines: list[Line] = []
-        line_changes = False
+        old_to_selected_lines: list[Line] = []
+        old_to_selected_lines_changed = False
+
+        selected_to_new_lines: list[Line] = []
+        selected_to_new_lines_changed = False
 
         for line_index, line in enumerate(change.lines):
-            line_ref = LineRef(change_index, line_index)
-            if line_ref in refs:
-                lines.append(line)
-                line_changes = True
-            elif line.old is not None:
-                lines.append(Line(line.old, line.old))
+            if line.status == "unchanged":
+                old_to_selected_lines.append(line)
+                selected_to_new_lines.append(line)
+
+            elif LineRef(change_index, line_index) in refs:
+                old_to_selected_lines.append(line)
+                if line.new is not None:
+                    selected_to_new_lines.append(Line(line.new, line.new))
+                old_to_selected_lines_changed = True
+
+            else:
+                if line.old is not None:
+                    old_to_selected_lines.append(Line(line.old, line.old))
+                selected_to_new_lines.append(line)
+                selected_to_new_lines_changed = True
 
         # Now we can check what the filtered change looks like
         match change:
             case AddFile(path, _, is_exec, is_deprioritized):
                 if change_ref in refs:
-                    yield AddFile(path, lines, is_exec, is_deprioritized)
+                    old_to_selected.append(
+                        AddFile(
+                            path,
+                            old_to_selected_lines,
+                            is_exec,
+                            is_deprioritized,
+                        )
+                    )
+                    if selected_to_new_lines_changed:
+                        selected_to_new.append(
+                            ModifyFile(
+                                renames.get(path, path),
+                                selected_to_new_lines,
+                                is_deprioritized,
+                            )
+                        )
+                else:
+                    assert not old_to_selected_lines
+                    selected_to_new.append(
+                        AddFile(
+                            renames.get(path, path),
+                            selected_to_new_lines,
+                            is_exec,
+                            is_deprioritized,
+                        )
+                    )
 
             case ModifyFile(path, _, is_deprioritized):
-                if line_changes:
-                    yield ModifyFile(path, lines, is_deprioritized)
+                if old_to_selected_lines_changed:
+                    old_to_selected.append(
+                        ModifyFile(
+                            path,
+                            old_to_selected_lines,
+                            is_deprioritized,
+                        )
+                    )
+                if selected_to_new_lines_changed:
+                    selected_to_new.append(
+                        ModifyFile(
+                            renames.get(path, path),
+                            selected_to_new_lines,
+                            is_deprioritized,
+                        )
+                    )
 
             case DeleteFile(path, _, is_exec, is_deprioritized):
                 if change_ref in refs:
-                    yield DeleteFile(path, lines, is_exec, is_deprioritized)
-                elif line_changes:
-                    yield ModifyFile(path, lines, is_deprioritized)
+                    assert not selected_to_new_lines
+                    old_to_selected.append(
+                        DeleteFile(
+                            path,
+                            old_to_selected_lines,
+                            is_exec,
+                            is_deprioritized,
+                        )
+                    )
+                else:
+                    if old_to_selected_lines_changed:
+                        old_to_selected.append(
+                            ModifyFile(
+                                path,
+                                old_to_selected_lines,
+                                is_deprioritized,
+                            )
+                        )
+                    selected_to_new.append(
+                        DeleteFile(
+                            renames.get(path, path),
+                            selected_to_new_lines,
+                            is_exec,
+                            is_deprioritized,
+                        )
+                    )
+
+    return old_to_selected, selected_to_new
 
 
 def apply_changes(root: Path, changes: Iterable[Change]) -> None:
