@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Fixed a bug where files containing tab characters would have messed up line wrapping.
 - Fixed a bug where applying a rename that introduced a new parent directory would crash.
+- Fixed a bug where the file mode of new files would not get used.
 
 ## [0.3.0] - 2025-08-11
 ### Fixed

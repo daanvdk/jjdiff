@@ -203,8 +203,8 @@ def diff_content(
                         )
                     yield ModifyBinary(
                         path,
-                        old_content_path.read_bytes(),
-                        new_content_path.read_bytes(),
+                        old_content_path,
+                        new_content_path,
                         is_deprioritized,
                     )
 
@@ -217,7 +217,7 @@ def diff_content(
                     )
                     yield AddBinary(
                         path,
-                        new_content_path.read_bytes(),
+                        new_content_path,
                         new_is_exec,
                         is_deprioritized,
                     )
@@ -225,7 +225,7 @@ def diff_content(
                 case None, list(new_lines):
                     yield DeleteBinary(
                         path,
-                        old_content_path.read_bytes(),
+                        old_content_path,
                         old_is_exec,
                         is_deprioritized,
                     )
@@ -396,7 +396,7 @@ def delete_content(path: Path, content: Content, is_deprioritized: bool) -> Chan
             else:
                 return DeleteBinary(
                     path,
-                    content_path.read_bytes(),
+                    content_path,
                     is_exec,
                     is_deprioritized,
                 )
@@ -417,7 +417,7 @@ def add_content(path: Path, content: Content, is_deprioritized: bool) -> Change:
             else:
                 return AddBinary(
                     path,
-                    content_path.read_bytes(),
+                    content_path,
                     is_exec,
                     is_deprioritized,
                 )

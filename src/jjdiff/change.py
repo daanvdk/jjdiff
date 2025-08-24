@@ -2,6 +2,7 @@ from collections.abc import Iterable, Iterator, Sequence, Set
 from dataclasses import dataclass
 import dataclasses
 from pathlib import Path
+import shutil
 import stat
 from typing import Literal
 
@@ -67,7 +68,7 @@ class DeleteFile:
 @dataclass
 class AddBinary:
     path: Path
-    data: bytes
+    content_path: Path
     is_exec: bool
     is_deprioritized: bool
 
@@ -75,15 +76,15 @@ class AddBinary:
 @dataclass
 class ModifyBinary:
     path: Path
-    old_data: bytes
-    new_data: bytes
+    old_content_path: Path
+    new_content_path: Path
     is_deprioritized: bool
 
 
 @dataclass
 class DeleteBinary:
     path: Path
-    data: bytes
+    content_path: Path
     is_exec: bool
     is_deprioritized: bool
 
@@ -144,17 +145,21 @@ def reverse_changes(changes: Iterable[Change]) -> Iterator[Change]:
                 path = renames.get(path, path)
                 yield AddFile(path, reverse_lines(lines), is_exec, is_deprioritized)
 
-            case AddBinary(path, data, is_exec, is_deprioritized):
+            case AddBinary(path, content_path, is_exec, is_deprioritized):
                 path = renames.get(path, path)
-                yield DeleteBinary(path, data, is_exec, is_deprioritized)
+                yield DeleteBinary(path, content_path, is_exec, is_deprioritized)
 
-            case ModifyBinary(path, old_data, new_data, is_deprioritized):
+            case ModifyBinary(
+                path, old_content_path, new_content_path, is_deprioritized
+            ):
                 path = renames.get(path, path)
-                yield ModifyBinary(path, new_data, old_data, is_deprioritized)
+                yield ModifyBinary(
+                    path, new_content_path, old_content_path, is_deprioritized
+                )
 
-            case DeleteBinary(path, data, is_exec, is_deprioritized):
+            case DeleteBinary(path, content_path, is_exec, is_deprioritized):
                 path = renames.get(path, path)
-                yield AddBinary(path, data, is_exec, is_deprioritized)
+                yield AddBinary(path, content_path, is_exec, is_deprioritized)
 
             case AddSymlink(path, to, is_deprioritized):
                 path = renames.get(path, path)
@@ -360,9 +365,15 @@ def apply_change(root: Path, change: Change) -> None:
 
             match change:
                 case AddFile(_, lines) | ModifyFile(_, lines):
-                    full_path.write_text(lines_to_text(lines))
-                case AddBinary(_, data) | ModifyBinary(_, _, data):
-                    full_path.write_bytes(data)
+                    write_lines(full_path, lines)
+                    if isinstance(change, AddFile) and change.is_exec:
+                        set_is_exec(full_path, True)
+
+                case AddBinary(_, content_path) | ModifyBinary(_, _, content_path):
+                    shutil.copyfile(content_path, full_path)
+                    if isinstance(change, AddBinary) and change.is_exec:
+                        set_is_exec(full_path, True)
+
                 case AddSymlink(_, to) | ModifySymlink(_, _, to):
                     full_path.symlink_to(to)
 
@@ -384,8 +395,30 @@ def apply_change(root: Path, change: Change) -> None:
                 full_path = full_path.parent
 
 
-def lines_to_text(lines: list[Line]) -> str:
-    return "\n".join(line.new for line in lines if line.new is not None)
+def write_lines(path: Path, lines: list[Line]) -> None:
+    with path.open("w", newline="") as f:
+        line_iter = (line.new for line in lines if line.new is not None)
+
+        try:
+            prev_line = next(line_iter)
+        except StopIteration:
+            return
+
+        for line in line_iter:
+            f.write(prev_line)
+            f.write("\n")
+            prev_line = line
+
+        f.write(prev_line)
+
+
+def set_is_exec(path: Path, is_exec: bool) -> None:
+    mode = path.stat().st_mode
+    if is_exec:
+        mode |= stat.S_IXUSR
+    else:
+        mode &= ~stat.S_IXUSR
+    path.chmod(mode)
 
 
 def get_change_refs(change_index: int, change: Change) -> set[Ref]:
