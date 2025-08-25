@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Sequence, Set
+from collections.abc import Iterable, Iterator, Sequence, Set
 from dataclasses import dataclass
 import dataclasses
 from pathlib import Path
@@ -387,3 +387,55 @@ def get_change_refs(change_index: int, change: Change) -> set[Ref]:
             refs.add(LineRef(change_index, line_index))
 
     return refs
+
+
+type Dep = tuple[Ref, Ref]
+
+
+def get_dependencies(changes: Iterable[Change]) -> Iterator[Dep]:
+    yield from get_path_dependencies(changes)
+    yield from get_line_dependencies(changes)
+
+
+def get_path_dependencies(changes: Iterable[Change]) -> Iterator[Dep]:
+    deletes: dict[Path, ChangeRef] = {}
+
+    for change_index, change in enumerate(changes):
+        change_ref = ChangeRef(change_index)
+
+        match change:
+            case DeleteFile(path) | DeleteBinary(path) | DeleteSymlink(path):
+                deletes[path] = change_ref
+
+            case AddFile(path) | AddBinary(path) | AddSymlink(path):
+                try:
+                    dependency = deletes[path]
+                except KeyError:
+                    pass
+                else:
+                    # Add cannot be done unless previous delete is done
+                    yield (change_ref, dependency)
+
+            case _:
+                pass
+
+
+def get_line_dependencies(changes: Iterable[Change]) -> Iterator[Dep]:
+    for change_index, change in enumerate(changes):
+        change_ref = ChangeRef(change_index)
+
+        match change:
+            case AddFile(_, lines):
+                for line_index in range(len(lines)):
+                    line_ref = LineRef(change_index, line_index)
+                    # Line cannot be added unless file is added
+                    yield (line_ref, change_ref)
+
+            case DeleteFile(_, lines):
+                for line_index in range(len(lines)):
+                    line_ref = LineRef(change_index, line_index)
+                    # File cannot be deleted unless line is deleted
+                    yield (change_ref, line_ref)
+
+            case _:
+                pass
