@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2025-08-26
 ### Added
 - Added a configuration file at `$XDG_CONFIG_HOME/jjdiff/config.toml`.
 - Added a deprioritize feature where you can specify a list of gitignore like patterns to deprioritze in `diff.deprioritize`. These files have the following behaviour:
@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial version of the application.
 
-[Unreleased]: https://github.com/daanvdk/jjdiff/compare/v0.3.0...HEAD
+[0.4.0]: https://github.com/daanvdk/jjdiff/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/daanvdk/jjdiff/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/daanvdk/jjdiff/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/daanvdk/jjdiff/releases/tag/v0.1.0

@@ -1,4 +1,6 @@
 # jjdiff
+[![PyPI](https://img.shields.io/pypi/v/jjdiff)](https://pypi.org/project/jjdiff/)
+
 A TUI that can be used as a diff editor in the jujutsu vcs.
 
 jjdiff will show all changes and allow you to navigate through them and
