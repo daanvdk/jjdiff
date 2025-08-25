@@ -1,7 +1,7 @@
 [project]
 name = "jjdiff"
-version = "0.3.0"
-description = "Add your description here"
+version = "0.4.0"
+description = "A TUI that can be used as a diff editor in the jujutsu vcs."
 readme = "README.md"
 authors = [
     { name = "Daan van der Kallen", email = "mail@daanvdk.com" }
