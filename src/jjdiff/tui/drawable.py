@@ -63,10 +63,6 @@ class Marker[T](Drawable, ABC):
     def get_value(self) -> T:
         raise NotImplementedError
 
-    @classmethod
-    def get(cls, metadata: Metadata) -> dict[int, list[T]]:
-        return cast(dict[int, list[T]], metadata.get(cls, {}))
-
     @override
     def base_width(self) -> int:
         return 0

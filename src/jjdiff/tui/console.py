@@ -11,7 +11,7 @@ from typing import Final
 from .keyboard import Keyboard
 from .drawable import Drawable
 from .text import DEFAULT_TEXT_STYLE, Text, TextStyle
-from .scroll import Scroll
+from .scroll import Scroll, State
 
 
 class NoResult:
@@ -24,7 +24,7 @@ NO_RESULT: Final[NoResult] = NoResult()
 class Console[Result](ABC):
     width: int
     height: int
-    scroll_state: Scroll.State
+    scroll_state: State
     scrollbar_style: TextStyle
 
     _drawable: Drawable
@@ -35,7 +35,7 @@ class Console[Result](ABC):
     _result: Result | NoResult
 
     def __init__(self, scrollbar_style: TextStyle = DEFAULT_TEXT_STYLE):
-        self.scroll_state = Scroll.State(self.post_render)
+        self.scroll_state = State(self.post_render)
         self.scrollbar_style = scrollbar_style
         self.width = 0
         self.height = 0
@@ -55,7 +55,7 @@ class Console[Result](ABC):
     def handle_key(self, key: str) -> None:
         raise NotImplementedError
 
-    def post_render(self, _scroll_state: Scroll.State) -> None:
+    def post_render(self, _state: State) -> None:
         pass
 
     @property
