@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from collections.abc import Sequence, Set
+from collections.abc import Iterable, Sequence, Set
 from typing import override
 
 from jjdiff.tui.console import Console
@@ -12,6 +12,7 @@ from ..change import (
     Change,
     ChangeRef,
     Ref,
+    get_all_refs,
     get_dependencies,
 )
 from .cursor import Cursor, ChangeCursor
@@ -125,6 +126,8 @@ class Editor(Console[Set[Ref] | None]):
                 self.shrink_cursor()
             case " ":
                 self.select_cursor()
+            case "a":
+                self.select_all()
             case "enter":
                 self.confirm()
             case "u":
@@ -163,6 +166,14 @@ class Editor(Console[Set[Ref] | None]):
 
     def select_cursor(self) -> None:
         refs = self.cursor.refs(self.changes)
+        self.select_refs(refs)
+
+    def select_all(self) -> None:
+        refs = get_all_refs(self.changes)
+        self.select_refs(refs)
+
+    def select_refs(self, refs: Iterable[Ref]) -> None:
+        refs = set(refs)
         new_refs = refs - self.included
 
         if new_refs:

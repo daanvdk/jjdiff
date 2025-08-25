@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import cast, override
 
 from ..change import (
@@ -51,7 +51,7 @@ class Cursor(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def refs(self, changes: Sequence[Change]) -> set[Ref]:
+    def refs(self, changes: Sequence[Change]) -> Iterator[Ref]:
         raise NotImplementedError
 
 
@@ -123,7 +123,7 @@ class ChangeCursor(Cursor):
         return HunkCursor(self.change, start, end)
 
     @override
-    def refs(self, changes: Sequence[Change]) -> set[Ref]:
+    def refs(self, changes: Sequence[Change]) -> Iterator[Ref]:
         return get_change_refs(self.change, changes[self.change])
 
 
@@ -235,8 +235,9 @@ class HunkCursor(Cursor):
         return LineCursor(self.change, self.start)
 
     @override
-    def refs(self, changes: Sequence[Change]) -> set[Ref]:
-        return {LineRef(self.change, line) for line in range(self.start, self.end)}
+    def refs(self, changes: Sequence[Change]) -> Iterator[Ref]:
+        for line in range(self.start, self.end):
+            yield LineRef(self.change, line)
 
 
 class LineCursor(Cursor):
@@ -344,5 +345,5 @@ class LineCursor(Cursor):
         return self
 
     @override
-    def refs(self, changes: Sequence[Change]) -> set[Ref]:
-        return {LineRef(self.change, self.line)}
+    def refs(self, changes: Sequence[Change]) -> Iterator[Ref]:
+        yield LineRef(self.change, self.line)
