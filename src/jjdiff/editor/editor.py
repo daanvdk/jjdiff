@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence, Set
-from pathlib import Path
 from typing import override
 
 from jjdiff.tui.console import Console
@@ -10,16 +9,10 @@ from jjdiff.tui.text import TextStyle
 
 
 from ..change import (
-    AddBinary,
-    AddFile,
-    AddSymlink,
     Change,
     ChangeRef,
-    DeleteBinary,
-    DeleteFile,
-    DeleteSymlink,
     Ref,
-    LineRef,
+    get_dependencies,
 )
 from .cursor import Cursor, ChangeCursor
 from .render.changes import render_changes
@@ -90,7 +83,10 @@ class Editor(Console[Set[Ref] | None]):
         self.included = set()
         self.include_dependencies = {}
         self.include_dependants = {}
-        self.add_dependencies()
+
+        for dependency, dependant in get_dependencies(changes):
+            self.include_dependencies.setdefault(dependant, set()).add(dependency)
+            self.include_dependants.setdefault(dependency, set()).add(dependant)
 
         self.opened = set()
 
@@ -101,56 +97,6 @@ class Editor(Console[Set[Ref] | None]):
 
         if not changes:
             self.set_result(frozenset())
-
-    def add_dependencies(self) -> None:
-        self.add_delete_add_dependencies()
-        self.add_line_dependencies()
-
-    def add_delete_add_dependencies(self) -> None:
-        # Add dependencies between deletes and adds on the same path
-        deleted: dict[Path, Ref] = {}
-
-        for change_index, change in enumerate(self.changes):
-            match change:
-                case DeleteFile(path) | DeleteBinary(path) | DeleteSymlink(path):
-                    deleted[path] = ChangeRef(change_index)
-
-                case AddFile(path) | AddBinary(path) | AddSymlink(path):
-                    try:
-                        dependency = deleted[path]
-                    except KeyError:
-                        pass
-                    else:
-                        dependant = ChangeRef(change_index)
-                        self.add_dependency(dependant, dependency)
-
-                case _:
-                    pass
-
-    def add_line_dependencies(self) -> None:
-        # Add dependencies between changes and lines in changes
-        for change_index, change in enumerate(self.changes):
-            match change:
-                case AddFile(_, lines):
-                    # All lines in an added file depend on the file being added
-                    change_ref = ChangeRef(change_index)
-                    for line_index in range(len(lines)):
-                        line_ref = LineRef(change_index, line_index)
-                        self.add_dependency(line_ref, change_ref)
-
-                case DeleteFile(_, lines):
-                    # A deleted file depends on all lines being deleted
-                    change_ref = ChangeRef(change_index)
-                    for line_index in range(len(lines)):
-                        line_ref = LineRef(change_index, line_index)
-                        self.add_dependency(change_ref, line_ref)
-
-                case _:
-                    pass
-
-    def add_dependency(self, dependant: Ref, dependency: Ref) -> None:
-        self.include_dependencies.setdefault(dependant, set()).add(dependency)
-        self.include_dependants.setdefault(dependency, set()).add(dependant)
 
     @override
     def render(self) -> Drawable:
