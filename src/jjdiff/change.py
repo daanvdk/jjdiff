@@ -374,19 +374,20 @@ def set_is_exec(path: Path, is_exec: bool) -> None:
     path.chmod(mode)
 
 
-def get_change_refs(change_index: int, change: Change) -> set[Ref]:
-    refs: set[Ref] = set()
-
+def get_change_refs(change_index: int, change: Change) -> Iterator[Ref]:
     # For modify file the change itself does nothing, just the lines matters
     if not isinstance(change, ModifyFile):
-        refs.add(ChangeRef(change_index))
+        yield ChangeRef(change_index)
 
     # For file changes we care about the lines
     if isinstance(change, FILE_CHANGE_TYPES):
         for line_index in range(len(change.lines)):
-            refs.add(LineRef(change_index, line_index))
+            yield LineRef(change_index, line_index)
 
-    return refs
+
+def get_all_refs(changes: Iterable[Change]) -> Iterator[Ref]:
+    for change_index, change in enumerate(changes):
+        yield from get_change_refs(change_index, change)
 
 
 type Dep = tuple[Ref, Ref]
