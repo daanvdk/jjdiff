@@ -1,6 +1,5 @@
 from pathlib import Path
 
-from jjdiff.change import Change, Rename
 
 from .config import load_config
 
@@ -25,10 +24,3 @@ def gitglob_to_shellglob(glob: str) -> str:
         glob = f"{glob}**"
 
     return glob
-
-
-def is_change_deprioritized(change: Change) -> bool:
-    if isinstance(change, Rename):
-        return is_path_deprioritized(change.new_path)
-    else:
-        return is_path_deprioritized(change.path)
