@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
+from jjdiff.deprioritize import is_change_deprioritized
 from jjdiff.tui.drawable import Drawable
 from jjdiff.tui.rows import Rows
 
@@ -84,7 +85,7 @@ def render_change(
 
         case AddFile(_, lines) | ModifyFile(_, lines) | DeleteFile(_, lines):
             # Hide change for deprioritized files in print mode
-            if cursor is None and change.is_deprioritized:
+            if cursor is None and is_change_deprioritized(change):
                 drawables.append(render_change_deprioritized(change_index, cursor))
             else:
                 drawables.append(

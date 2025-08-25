@@ -57,7 +57,7 @@ def test_diff_files_add(temp_dir_factory: TempDirFactory) -> None:
     new_dir = temp_dir_factory({"foo.txt": "foo"})
 
     assert diff(old_dir, new_dir) == [
-        AddFile(Path("foo.txt"), [Line(None, "foo")], False, False),
+        AddFile(Path("foo.txt"), [Line(None, "foo")], False),
     ]
 
 
@@ -66,7 +66,7 @@ def test_diff_files_delete(temp_dir_factory: TempDirFactory) -> None:
     new_dir = temp_dir_factory({})
 
     assert diff(old_dir, new_dir) == [
-        DeleteFile(Path("foo.txt"), [Line("foo", None)], False, False),
+        DeleteFile(Path("foo.txt"), [Line("foo", None)], False),
     ]
 
 
@@ -75,7 +75,7 @@ def test_diff_files_modify(temp_dir_factory: TempDirFactory) -> None:
     new_dir = temp_dir_factory({"foo.txt": "bar"})
 
     assert diff(old_dir, new_dir) == [
-        ModifyFile(Path("foo.txt"), [Line("foo", None), Line(None, "bar")], False),
+        ModifyFile(Path("foo.txt"), [Line("foo", None), Line(None, "bar")]),
     ]
 
 
@@ -84,7 +84,7 @@ def test_diff_files_modify_similar(temp_dir_factory: TempDirFactory) -> None:
     new_dir = temp_dir_factory({"bar.txt": "baz"})
 
     assert diff(old_dir, new_dir) == [
-        ModifyFile(Path("bar.txt"), [Line("bar", "baz")], False),
+        ModifyFile(Path("bar.txt"), [Line("bar", "baz")]),
     ]
 
 
@@ -93,5 +93,5 @@ def test_diff_files_modify_is_exec(temp_dir_factory: TempDirFactory) -> None:
     new_dir = temp_dir_factory({"foo.txt": ExecFile("foo")})
 
     assert diff(old_dir, new_dir) == [
-        ChangeMode(Path("foo.txt"), False, True, False),
+        ChangeMode(Path("foo.txt"), False, True),
     ]
