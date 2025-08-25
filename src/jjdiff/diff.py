@@ -25,7 +25,7 @@ from .change import (
     DeleteSymlink,
     Line,
 )
-from .config import path_deprioritized
+from .deprioritize import is_change_deprioritized
 
 
 SIMILARITY_THRESHOLD = 0.6
@@ -104,10 +104,7 @@ def diff_contents(
         except KeyError:
             added[path] = new_content
         else:
-            is_deprioritized = path_deprioritized(path)
-            changes.extend(
-                diff_content(path, old_content, new_content, is_deprioritized)
-            )
+            changes.extend(diff_content(path, old_content, new_content))
 
     # Now we look for all paths that are in old but not in new
     deleted = {path: old[path] for path in old if path not in new}
@@ -133,21 +130,16 @@ def diff_contents(
         old_content = deleted.pop(old_path)
         new_content = added.pop(new_path)
 
-        is_deprioritized = path_deprioritized(new_path)
-        changes.append(Rename(old_path, new_path, is_deprioritized))
-        changes.extend(
-            diff_content(old_path, old_content, new_content, is_deprioritized)
-        )
+        changes.append(Rename(old_path, new_path))
+        changes.extend(diff_content(old_path, old_content, new_content))
         renamed[old_path] = new_path
 
     # All the rest we can delete/add
     for path, content in deleted.items():
-        is_deprioritized = path_deprioritized(path)
-        changes.append(delete_content(path, content, is_deprioritized))
+        changes.append(delete_content(path, content))
 
     for path, content in added.items():
-        is_deprioritized = path_deprioritized(path)
-        changes.append(add_content(path, content, is_deprioritized))
+        changes.append(add_content(path, content))
 
     changes.sort(key=change_key)
     return changes
@@ -166,83 +158,51 @@ def change_key(change: Change) -> tuple[bool, Path, int]:
         case AddFile(path) | AddBinary(path) | AddSymlink(path):
             priority = 4
 
-    return (change.is_deprioritized, path, priority)
+    return (is_change_deprioritized(change), path, priority)
 
 
 def diff_content(
     path: Path,
     old_content: Content,
     new_content: Content,
-    is_deprioritized: bool,
 ) -> Iterator[Change]:
     match old_content, new_content:
         case File(old_content_path, old_is_exec), File(new_content_path, new_is_exec):
             if content_is_equal(old_content_path, new_content_path):
+                if old_is_exec != new_is_exec:
+                    yield ChangeMode(path, old_is_exec, new_is_exec)
                 return
 
             match split_lines(old_content_path), split_lines(new_content_path):
                 case list(old_lines), list(new_lines):
                     if old_is_exec != new_is_exec:
-                        yield ChangeMode(
-                            path,
-                            old_is_exec,
-                            new_is_exec,
-                            is_deprioritized,
-                        )
+                        yield ChangeMode(path, old_is_exec, new_is_exec)
                     lines = diff_lines(old_lines, new_lines)
                     if any(line.status != "unchanged" for line in lines):
-                        yield ModifyFile(path, lines, is_deprioritized)
+                        yield ModifyFile(path, lines)
 
                 case None, None:
                     if old_is_exec != new_is_exec:
-                        yield ChangeMode(
-                            path,
-                            old_is_exec,
-                            new_is_exec,
-                            is_deprioritized,
-                        )
-                    yield ModifyBinary(
-                        path,
-                        old_content_path,
-                        new_content_path,
-                        is_deprioritized,
-                    )
+                        yield ChangeMode(path, old_is_exec, new_is_exec)
+                    yield ModifyBinary(path, old_content_path, new_content_path)
 
                 case list(old_lines), None:
-                    yield DeleteFile(
-                        path,
-                        [Line(line, None) for line in old_lines],
-                        old_is_exec,
-                        is_deprioritized,
-                    )
-                    yield AddBinary(
-                        path,
-                        new_content_path,
-                        new_is_exec,
-                        is_deprioritized,
-                    )
+                    lines = [Line(line, None) for line in old_lines]
+                    yield DeleteFile(path, lines, old_is_exec)
+                    yield AddBinary(path, new_content_path, new_is_exec)
 
                 case None, list(new_lines):
-                    yield DeleteBinary(
-                        path,
-                        old_content_path,
-                        old_is_exec,
-                        is_deprioritized,
-                    )
-                    yield AddFile(
-                        path,
-                        [Line(None, line) for line in new_lines],
-                        new_is_exec,
-                        is_deprioritized,
-                    )
+                    yield DeleteBinary(path, old_content_path, old_is_exec)
+                    lines = [Line(None, line) for line in new_lines]
+                    yield AddFile(path, lines, new_is_exec)
 
         case Symlink(old_to), Symlink(new_to):
             if old_to != new_to:
-                yield ModifySymlink(path, old_to, new_to, is_deprioritized)
+                yield ModifySymlink(path, old_to, new_to)
 
         case _:
-            yield delete_content(path, old_content, is_deprioritized)
-            yield add_content(path, new_content, is_deprioritized)
+            yield delete_content(path, old_content)
+            yield add_content(path, new_content)
 
 
 def content_is_equal(old_content: Path, new_content: Path) -> bool:
@@ -383,46 +343,28 @@ def stable_hash(data: memoryview) -> bytes:
     return hashlib.blake2b(data, digest_size=8).digest()
 
 
-def delete_content(path: Path, content: Content, is_deprioritized: bool) -> Change:
+def delete_content(path: Path, content: Content) -> Change:
     match content:
         case File(content_path, is_exec):
-            if lines := split_lines(content_path):
-                return DeleteFile(
-                    path,
-                    [Line(line, None) for line in lines],
-                    is_exec,
-                    is_deprioritized,
-                )
+            if old_lines := split_lines(content_path):
+                lines = [Line(line, None) for line in old_lines]
+                return DeleteFile(path, lines, is_exec)
             else:
-                return DeleteBinary(
-                    path,
-                    content_path,
-                    is_exec,
-                    is_deprioritized,
-                )
+                return DeleteBinary(path, content_path, is_exec)
         case Symlink(to):
-            return DeleteSymlink(path, to, is_deprioritized)
+            return DeleteSymlink(path, to)
 
 
-def add_content(path: Path, content: Content, is_deprioritized: bool) -> Change:
+def add_content(path: Path, content: Content) -> Change:
     match content:
         case File(content_path, is_exec):
-            if lines := split_lines(content_path):
-                return AddFile(
-                    path,
-                    [Line(None, line) for line in lines],
-                    is_exec,
-                    is_deprioritized,
-                )
+            if new_lines := split_lines(content_path):
+                lines = [Line(None, line) for line in new_lines]
+                return AddFile(path, lines, is_exec)
             else:
-                return AddBinary(
-                    path,
-                    content_path,
-                    is_exec,
-                    is_deprioritized,
-                )
+                return AddBinary(path, content_path, is_exec)
         case Symlink(to):
-            return AddSymlink(path, to, is_deprioritized)
+            return AddSymlink(path, to)
 
 
 def get_line_similarity(old: str, new: str) -> float:

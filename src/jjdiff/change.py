@@ -31,7 +31,6 @@ class Line:
 class Rename:
     old_path: Path
     new_path: Path
-    is_deprioritized: bool
 
 
 @dataclass
@@ -39,7 +38,6 @@ class ChangeMode:
     path: Path
     old_is_exec: bool
     new_is_exec: bool
-    is_deprioritized: bool
 
 
 @dataclass
@@ -47,14 +45,12 @@ class AddFile:
     path: Path
     lines: list[Line]
     is_exec: bool
-    is_deprioritized: bool
 
 
 @dataclass
 class ModifyFile:
     path: Path
     lines: list[Line]
-    is_deprioritized: bool
 
 
 @dataclass
@@ -62,7 +58,6 @@ class DeleteFile:
     path: Path
     lines: list[Line]
     is_exec: bool
-    is_deprioritized: bool
 
 
 @dataclass
@@ -70,7 +65,6 @@ class AddBinary:
     path: Path
     content_path: Path
     is_exec: bool
-    is_deprioritized: bool
 
 
 @dataclass
@@ -78,7 +72,6 @@ class ModifyBinary:
     path: Path
     old_content_path: Path
     new_content_path: Path
-    is_deprioritized: bool
 
 
 @dataclass
@@ -86,14 +79,12 @@ class DeleteBinary:
     path: Path
     content_path: Path
     is_exec: bool
-    is_deprioritized: bool
 
 
 @dataclass
 class AddSymlink:
     path: Path
     to: Path
-    is_deprioritized: bool
 
 
 @dataclass
@@ -101,14 +92,12 @@ class ModifySymlink:
     path: Path
     old_to: Path
     new_to: Path
-    is_deprioritized: bool
 
 
 @dataclass
 class DeleteSymlink:
     path: Path
     to: Path
-    is_deprioritized: bool
 
 
 type FileChange = AddFile | ModifyFile | DeleteFile
@@ -125,53 +114,49 @@ def reverse_changes(changes: Iterable[Change]) -> Iterator[Change]:
 
     for change in changes:
         match change:
-            case Rename(old_path, new_path, is_deprioritized):
-                yield Rename(new_path, old_path, is_deprioritized)
+            case Rename(old_path, new_path):
+                yield Rename(new_path, old_path)
                 renames[old_path] = new_path
 
-            case ChangeMode(path, old_is_exec, new_is_exec, is_deprioritized):
+            case ChangeMode(path, old_is_exec, new_is_exec):
                 path = renames.get(path, path)
-                yield ChangeMode(path, new_is_exec, old_is_exec, is_deprioritized)
+                yield ChangeMode(path, new_is_exec, old_is_exec)
 
-            case AddFile(path, lines, is_exec, is_deprioritized):
+            case AddFile(path, lines, is_exec):
                 path = renames.get(path, path)
-                yield DeleteFile(path, reverse_lines(lines), is_exec, is_deprioritized)
+                yield DeleteFile(path, reverse_lines(lines), is_exec)
 
-            case ModifyFile(path, lines, is_deprioritized):
+            case ModifyFile(path, lines):
                 path = renames.get(path, path)
-                yield ModifyFile(path, reverse_lines(lines), is_deprioritized)
+                yield ModifyFile(path, reverse_lines(lines))
 
-            case DeleteFile(path, lines, is_exec, is_deprioritized):
+            case DeleteFile(path, lines, is_exec):
                 path = renames.get(path, path)
-                yield AddFile(path, reverse_lines(lines), is_exec, is_deprioritized)
+                yield AddFile(path, reverse_lines(lines), is_exec)
 
-            case AddBinary(path, content_path, is_exec, is_deprioritized):
+            case AddBinary(path, content_path, is_exec):
                 path = renames.get(path, path)
-                yield DeleteBinary(path, content_path, is_exec, is_deprioritized)
+                yield DeleteBinary(path, content_path, is_exec)
 
-            case ModifyBinary(
-                path, old_content_path, new_content_path, is_deprioritized
-            ):
+            case ModifyBinary(path, old_content_path, new_content_path):
                 path = renames.get(path, path)
-                yield ModifyBinary(
-                    path, new_content_path, old_content_path, is_deprioritized
-                )
+                yield ModifyBinary(path, new_content_path, old_content_path)
 
-            case DeleteBinary(path, content_path, is_exec, is_deprioritized):
+            case DeleteBinary(path, content_path, is_exec):
                 path = renames.get(path, path)
-                yield AddBinary(path, content_path, is_exec, is_deprioritized)
+                yield AddBinary(path, content_path, is_exec)
 
-            case AddSymlink(path, to, is_deprioritized):
+            case AddSymlink(path, to):
                 path = renames.get(path, path)
-                yield DeleteSymlink(path, to, is_deprioritized)
+                yield DeleteSymlink(path, to)
 
-            case ModifySymlink(path, old_to, new_to, is_deprioritized):
+            case ModifySymlink(path, old_to, new_to):
                 path = renames.get(path, path)
-                yield ModifySymlink(path, new_to, old_to, is_deprioritized)
+                yield ModifySymlink(path, new_to, old_to)
 
-            case DeleteSymlink(path, to, is_deprioritized):
+            case DeleteSymlink(path, to):
                 path = renames.get(path, path)
-                yield AddSymlink(path, to, is_deprioritized)
+                yield AddSymlink(path, to)
 
 
 def reverse_lines(lines: list[Line]) -> list[Line]:
@@ -196,8 +181,8 @@ def split_changes(
     changes: Iterable[Change],
     refs: Set[Ref],
 ) -> tuple[Sequence[Change], Sequence[Change]]:
-    old_to_selected: list[Change] = []
-    selected_to_new: list[Change] = []
+    old_to_sel: list[Change] = []
+    sel_to_new: list[Change] = []
     renames: dict[Path, Path] = {}
 
     for change_index, change in enumerate(changes):
@@ -206,7 +191,7 @@ def split_changes(
         # For non file changes we just include the whole change or not
         if not isinstance(change, FILE_CHANGE_TYPES):
             if change_ref in refs:
-                old_to_selected.append(change)
+                old_to_sel.append(change)
                 if isinstance(change, Rename):
                     renames[change.old_path] = change.new_path
             else:
@@ -216,112 +201,64 @@ def split_changes(
                 else:
                     path = renames.get(change.path, change.path)
                     change = dataclasses.replace(change, path=path)
-                selected_to_new.append(change)
+                sel_to_new.append(change)
             continue
 
         # Now that we know we have a file change, we first filter the lines
-        old_to_selected_lines: list[Line] = []
-        old_to_selected_lines_changed = False
+        old_to_sel_lines: list[Line] = []
+        old_to_sel_lines_changed = False
 
-        selected_to_new_lines: list[Line] = []
-        selected_to_new_lines_changed = False
+        sel_to_new_lines: list[Line] = []
+        sel_to_new_lines_changed = False
 
         for line_index, line in enumerate(change.lines):
             if line.status == "unchanged":
-                old_to_selected_lines.append(line)
-                selected_to_new_lines.append(line)
+                old_to_sel_lines.append(line)
+                sel_to_new_lines.append(line)
 
             elif LineRef(change_index, line_index) in refs:
-                old_to_selected_lines.append(line)
+                old_to_sel_lines.append(line)
                 if line.new is not None:
-                    selected_to_new_lines.append(Line(line.new, line.new))
-                old_to_selected_lines_changed = True
+                    sel_to_new_lines.append(Line(line.new, line.new))
+                old_to_sel_lines_changed = True
 
             else:
                 if line.old is not None:
-                    old_to_selected_lines.append(Line(line.old, line.old))
-                selected_to_new_lines.append(line)
-                selected_to_new_lines_changed = True
+                    old_to_sel_lines.append(Line(line.old, line.old))
+                sel_to_new_lines.append(line)
+                sel_to_new_lines_changed = True
 
         # Now we can check what the filtered change looks like
         match change:
-            case AddFile(path, _, is_exec, is_deprioritized):
+            case AddFile(path, _, is_exec):
                 if change_ref in refs:
-                    old_to_selected.append(
-                        AddFile(
-                            path,
-                            old_to_selected_lines,
-                            is_exec,
-                            is_deprioritized,
-                        )
-                    )
-                    if selected_to_new_lines_changed:
-                        selected_to_new.append(
-                            ModifyFile(
-                                renames.get(path, path),
-                                selected_to_new_lines,
-                                is_deprioritized,
-                            )
-                        )
+                    old_to_sel.append(AddFile(path, old_to_sel_lines, is_exec))
+                    if sel_to_new_lines_changed:
+                        sel_path = renames.get(path, path)
+                        sel_to_new.append(ModifyFile(sel_path, sel_to_new_lines))
                 else:
-                    assert not old_to_selected_lines
-                    selected_to_new.append(
-                        AddFile(
-                            renames.get(path, path),
-                            selected_to_new_lines,
-                            is_exec,
-                            is_deprioritized,
-                        )
-                    )
+                    assert not old_to_sel_lines
+                    sel_path = renames.get(path, path)
+                    sel_to_new.append(AddFile(sel_path, sel_to_new_lines, is_exec))
 
-            case ModifyFile(path, _, is_deprioritized):
-                if old_to_selected_lines_changed:
-                    old_to_selected.append(
-                        ModifyFile(
-                            path,
-                            old_to_selected_lines,
-                            is_deprioritized,
-                        )
-                    )
-                if selected_to_new_lines_changed:
-                    selected_to_new.append(
-                        ModifyFile(
-                            renames.get(path, path),
-                            selected_to_new_lines,
-                            is_deprioritized,
-                        )
-                    )
+            case ModifyFile(path, _):
+                if old_to_sel_lines_changed:
+                    old_to_sel.append(ModifyFile(path, old_to_sel_lines))
+                if sel_to_new_lines_changed:
+                    sel_path = renames.get(path, path)
+                    sel_to_new.append(ModifyFile(sel_path, sel_to_new_lines))
 
-            case DeleteFile(path, _, is_exec, is_deprioritized):
+            case DeleteFile(path, _, is_exec):
                 if change_ref in refs:
-                    assert not selected_to_new_lines
-                    old_to_selected.append(
-                        DeleteFile(
-                            path,
-                            old_to_selected_lines,
-                            is_exec,
-                            is_deprioritized,
-                        )
-                    )
+                    old_to_sel.append(DeleteFile(path, old_to_sel_lines, is_exec))
+                    assert not sel_to_new_lines
                 else:
-                    if old_to_selected_lines_changed:
-                        old_to_selected.append(
-                            ModifyFile(
-                                path,
-                                old_to_selected_lines,
-                                is_deprioritized,
-                            )
-                        )
-                    selected_to_new.append(
-                        DeleteFile(
-                            renames.get(path, path),
-                            selected_to_new_lines,
-                            is_exec,
-                            is_deprioritized,
-                        )
-                    )
+                    if old_to_sel_lines_changed:
+                        old_to_sel.append(ModifyFile(path, old_to_sel_lines))
+                    sel_path = renames.get(path, path)
+                    sel_to_new.append(DeleteFile(sel_path, sel_to_new_lines, is_exec))
 
-    return old_to_selected, selected_to_new
+    return old_to_sel, sel_to_new
 
 
 def apply_changes(root: Path, changes: Iterable[Change]) -> None:
@@ -342,13 +279,7 @@ def apply_change(root: Path, change: Change) -> None:
         case ChangeMode(path, _, is_exec):
             path = renames.get(path, path)
             full_path = root / path
-
-            mode = full_path.stat().st_mode
-            if is_exec:
-                mode |= stat.S_IXUSR
-            else:
-                mode &= ~stat.S_IXUSR
-            full_path.chmod(mode)
+            set_is_exec(full_path, is_exec)
 
         case (
             AddFile(path)
@@ -362,25 +293,16 @@ def apply_change(root: Path, change: Change) -> None:
             full_path = root / path
 
             full_path.parent.mkdir(parents=True, exist_ok=True)
-
             match change:
                 case AddFile(_, lines) | ModifyFile(_, lines):
                     write_lines(full_path, lines)
-                    if isinstance(change, AddFile) and change.is_exec:
-                        set_is_exec(full_path, True)
-
                 case AddBinary(_, content_path) | ModifyBinary(_, _, content_path):
                     shutil.copyfile(content_path, full_path)
-                    if isinstance(change, AddBinary) and change.is_exec:
-                        set_is_exec(full_path, True)
-
                 case AddSymlink(_, to) | ModifySymlink(_, _, to):
                     full_path.symlink_to(to)
 
             if isinstance(change, (AddFile, AddBinary)) and change.is_exec:
-                mode = full_path.stat().st_mode
-                mode |= stat.S_IXUSR
-                full_path.chmod(mode)
+                set_is_exec(full_path, True)
 
         case DeleteFile(path) | DeleteBinary(path) | DeleteSymlink(path):
             path = renames.get(path, path)
