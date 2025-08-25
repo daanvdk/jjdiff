@@ -1,17 +1,17 @@
-from abc import ABC, abstractmethod
-from contextlib import ExitStack
 import os
 import signal
 import sys
 import termios
 import tty
+from abc import ABC, abstractmethod
+from contextlib import ExitStack
 from types import FrameType
 from typing import Final
 
-from .keyboard import Keyboard
 from .drawable import Drawable
-from .text import DEFAULT_TEXT_STYLE, Text, TextStyle
+from .keyboard import Keyboard
 from .scroll import Scroll, State
+from .text import DEFAULT_TEXT_STYLE, Text, TextStyle
 
 
 class NoResult:

@@ -4,7 +4,6 @@ from jjdiff.tui.text import TextColor
 
 from ...change import LineStatus
 
-
 STATUS_COLOR: Mapping[LineStatus, TextColor] = {
     "added": "green",
     "changed": "yellow",

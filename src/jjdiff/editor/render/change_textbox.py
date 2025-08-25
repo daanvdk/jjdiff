@@ -1,7 +1,7 @@
 from jjdiff.tui.drawable import Drawable
 from jjdiff.tui.fill import Fill
-from jjdiff.tui.text import Text, TextStyle
 from jjdiff.tui.grid import Grid
+from jjdiff.tui.text import Text, TextStyle
 
 from ..cursor import Cursor
 from .styles import SELECTED_BG, SELECTED_FG

@@ -13,21 +13,20 @@ from ...change import (
     DeleteBinary,
     DeleteFile,
     DeleteSymlink,
-    Ref,
     Line,
     ModifyBinary,
     ModifyFile,
     ModifySymlink,
+    Ref,
     Rename,
     get_change_refs,
     is_change_deprioritized,
 )
 from ..cursor import Cursor
-from .change_title import render_change_title
-from .change_file import render_change_file
 from .change_binary import render_change_binary
 from .change_deprioritized import render_change_deprioritized
-
+from .change_file import render_change_file
+from .change_title import render_change_title
 
 type ChangeIncluded = Literal["full", "partial", "none"]
 

@@ -7,7 +7,6 @@ from .diff import diff
 from .editor import Editor
 from .editor.render.changes import render_changes
 
-
 parser = argparse.ArgumentParser()
 parser.add_argument("--print", action="store_true")
 parser.add_argument("old", type=Path)

@@ -25,15 +25,20 @@ dev = [
     "ruff>=0.12.5",
 ]
 
+[tool.ruff]
+fix = true
+
+[tool.ruff.lint]
+extend-select = ["I"]
+
 [tool.pyright]
-venvPath = "."
-venv = ".venv"
 reportUnusedCallResult = false
 
 [tool.poe.tasks]
 lint = "ruff check"
+lint-check = "ruff check --no-fix"
 format = "ruff format"
-"format:check" = "ruff format --check"
+format-check = "ruff format --check"
 typecheck = "pyright"
 test = "pytest"
 check = ["lint", "format", "typecheck", "test"]

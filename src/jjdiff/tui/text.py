@@ -4,7 +4,6 @@ from typing import Literal, overload, override
 
 from .drawable import Drawable
 
-
 type TextColor = Literal[
     "black",
     "red",

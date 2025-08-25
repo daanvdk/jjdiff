@@ -2,7 +2,6 @@ import os
 import select
 import sys
 
-
 type KeyMap = dict[int, KeyMap] | str
 
 KEY_MAP: dict[int, KeyMap] = {}

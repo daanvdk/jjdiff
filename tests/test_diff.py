@@ -1,6 +1,7 @@
 from pathlib import Path
-from jjdiff.diff import diff, diff_lines
+
 from jjdiff.change import AddFile, ChangeMode, DeleteFile, Line, ModifyFile
+from jjdiff.diff import diff, diff_lines
 
 from .utils import DirFactory, ExecFile
 

@@ -1,32 +1,31 @@
+import hashlib
+import heapq
+import mmap
+import stat
 from collections import Counter
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-import hashlib
-import heapq
 from itertools import product
 from pathlib import Path
-import stat
 from typing import override
-import mmap
 
 from .change import (
-    Change,
-    Rename,
-    ChangeMode,
-    AddFile,
-    ModifyFile,
-    DeleteFile,
     AddBinary,
-    ModifyBinary,
-    DeleteBinary,
+    AddFile,
     AddSymlink,
-    ModifySymlink,
+    Change,
+    ChangeMode,
+    DeleteBinary,
+    DeleteFile,
     DeleteSymlink,
     Line,
+    ModifyBinary,
+    ModifyFile,
+    ModifySymlink,
+    Rename,
     change_key,
 )
-
 
 SIMILARITY_THRESHOLD = 0.6
 

@@ -2,21 +2,20 @@ from difflib import SequenceMatcher
 
 from jjdiff.config import load_config
 from jjdiff.tui.drawable import Drawable
-from jjdiff.tui.rows import Rows
 from jjdiff.tui.fill import Fill
-from jjdiff.tui.text import Text, TextStyle
 from jjdiff.tui.grid import Grid
+from jjdiff.tui.rows import Rows
+from jjdiff.tui.text import Text, TextStyle
 
 from ...change import (
-    Ref,
     Line,
     LineRef,
     LineStatus,
+    Ref,
 )
 from ..cursor import Cursor
-from .styles import SELECTED_BG, SELECTED_FG, STATUS_COLOR
 from .markers import SelectionMarker
-
+from .styles import SELECTED_BG, SELECTED_FG, STATUS_COLOR
 
 MIN_CONTEXT = 3
 MIN_OMITTED = 2
