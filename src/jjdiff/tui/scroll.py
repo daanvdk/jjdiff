@@ -45,7 +45,7 @@ class Scroll(Drawable):
             while True:
                 lines.append(next(line_gen))
         except StopIteration as e:
-            self.state.metadata = cast(Metadata, e.value)
+            self.state._metadata = cast(Metadata, e.value)
 
         # Get scroll state
         self.state.lines = len(lines)
@@ -78,24 +78,28 @@ class Scroll(Drawable):
 
         yield from view
 
-    class State:
-        lines: int
-        height: int
-        metadata: Metadata
 
-        _y: int
-        _on_render: "Callable[[Scroll.State], None]"
+class State:
+    lines: int
+    height: int
 
-        def __init__(self, on_render: "Callable[[Scroll.State], None]"):
-            self.lines = 0
-            self.height = 0
-            self.metadata = {}
+    _y: int
+    _on_render: "Callable[[State], None]"
+    _metadata: Metadata
 
-            self._y = 0
-            self._on_render = on_render
+    def __init__(self, on_render: "Callable[[State], None]"):
+        self.lines = 0
+        self.height = 0
 
-        def scroll_to(self, start: int, end: int, *, padding: int = 5) -> None:
-            y = min(max(self._y, end + padding - self.height), start - padding)
-            y = max(min(y, self.lines - self.height), 0)
+        self._y = 0
+        self._on_render = on_render
+        self._metadata = {}
 
-            self._y = y
+    def scroll_to(self, start: int, end: int, *, padding: int = 5) -> None:
+        y = min(max(self._y, end + padding - self.height), start - padding)
+        y = max(min(y, self.lines - self.height), 0)
+
+        self._y = y
+
+    def get_markers[T](self, marker_type: type[Marker[T]]) -> dict[int, list[T]]:
+        return self._metadata.get(marker_type, {})

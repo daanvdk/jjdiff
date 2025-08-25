@@ -4,7 +4,7 @@ from typing import override
 
 from jjdiff.tui.console import Console
 from jjdiff.tui.drawable import Drawable
-from jjdiff.tui.scroll import Scroll
+from jjdiff.tui.scroll import State
 from jjdiff.tui.text import TextStyle
 
 
@@ -103,12 +103,12 @@ class Editor(Console[Set[Ref] | None]):
         return render_changes(self.changes, self.cursor, self.included, self.opened)
 
     @override
-    def post_render(self, scroll_state: Scroll.State) -> None:
+    def post_render(self, state: State) -> None:
         # Scroll to the selection
-        markers = SelectionMarker.get(scroll_state.metadata) or {0: []}
+        markers = state.get_markers(SelectionMarker) or {0: []}
         start = min(markers)
         end = max(markers) + 1
-        scroll_state.scroll_to(start, end)
+        state.scroll_to(start, end)
 
     @override
     def handle_key(self, key: str) -> None:
