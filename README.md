@@ -21,6 +21,7 @@ This cursor can operate on 3 levels:
 | `shrink_cursor` | `l` or `right` | Shrink the cursor. So go from change to hunk and from hunk to line. If the cursor is on an unopened change it will open it first. |
 | `grow_cursor` | `h` or `left` | Grow the cursor. So go from line to hunk and from hunk to change. If the cursor is on an opened change it will close it. |
 | `select_cursor` | `space` | Mark everything selected by the cursor to be included. If everything is already marked it will exclude it instead. This will also select the next entry. |
+| `select_all` | `a` | Mark everything in the diff to be included. If everything is already marked it will exclude it instead. |
 | `confirm` | `enter` | Confirm the selected changes. | 
 | `undo` | `u` | Undo the last command. Commands that only affect the UI state like changing the cursor and opening/closing changes are not included in this. |
 | `redo` | `U` | Redo the last undone command. Commands that only affect the UI state like changing the cursor and opening/closing changes are not included in this. |
@@ -36,3 +37,16 @@ diff-editor = "jjdiff"
 diff-instructions = false  # not required but recommended
 diff-formatter = ["jjdiff", "--print", "$left", "$right"]  # to also format diffs using jjdiff
 ```
+
+## Configuration
+jjdiff can be configured in `~/.config/jjdiff/config.toml` with the following
+configuration options.
+
+### diff.deprioritize
+This contains a list of gitignore style globs that can be used to deprioritize
+certain files in diffs. Deprioritizing has the following effects:
+- Deprioritized files are always at the end of the diff.
+- In `jjdiff --print` the changes in deprioritized files are not shown.
+
+### format.tab_width
+Controls as how many spaces a tab is formatted in the diff. Default is 4.

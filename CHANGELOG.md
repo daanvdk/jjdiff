@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `jjdiff --print` does not show the contents of the change.
 - Added a small change summary of addition and deletion count to file changes.
 - Added a `format.tab_width` setting to configure as how many spaces a tab character shows (default 4).
+- Added a select all functionality that is bound to the `A`-key.
 
 ### Fixed
 - Fixed a bug where files containing tab characters would have messed up line wrapping.
