@@ -1,10 +1,9 @@
-from abc import ABC, abstractmethod
-from collections.abc import Generator, Iterator
 import fcntl
 import struct
 import termios
+from abc import ABC, abstractmethod
+from collections.abc import Generator, Iterator
 from typing import Any, cast, override
-
 
 type Metadata = dict[type, dict[int, list[Any]]]
 

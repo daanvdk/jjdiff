@@ -1,15 +1,14 @@
+import tempfile
 from collections.abc import Iterator
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
-import tempfile
 
 import pytest
 
 from jjdiff.config import Config
 
-from .utils import DirSpec, DirFactory, write_spec
-
+from .utils import DirFactory, DirSpec, write_spec
 
 # Always use default config in tests
 

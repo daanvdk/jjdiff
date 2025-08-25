@@ -1,9 +1,8 @@
 from collections.abc import Iterator, Mapping
 from typing import Any, Callable, cast, override
 
-from .text import DEFAULT_TEXT_STYLE, TextStyle
 from .drawable import Drawable, Marker, Metadata
-
+from .text import DEFAULT_TEXT_STYLE, TextStyle
 
 SCROLLBAR_CHAR: Mapping[tuple[bool, bool], str] = {
     (False, False): " ",

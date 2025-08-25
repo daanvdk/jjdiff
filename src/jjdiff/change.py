@@ -1,13 +1,12 @@
-from collections.abc import Iterable, Iterator, Sequence, Set
-from dataclasses import dataclass
 import dataclasses
-from pathlib import Path
 import shutil
 import stat
+from collections.abc import Iterable, Iterator, Sequence, Set
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from .deprioritize import is_path_deprioritized
-
 
 type LineStatus = Literal["added", "deleted", "changed", "unchanged"]
 

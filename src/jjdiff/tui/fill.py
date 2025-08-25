@@ -1,9 +1,8 @@
 from collections.abc import Iterator
 from typing import override
 
-from .text import DEFAULT_TEXT_STYLE, TextStyle
-
 from .drawable import Drawable
+from .text import DEFAULT_TEXT_STYLE, TextStyle
 
 
 class Fill(Drawable):

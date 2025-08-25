@@ -1,5 +1,5 @@
 from pathlib import Path
-from jjdiff.diff import diff
+
 from jjdiff.change import (
     AddFile,
     ChangeRef,
@@ -11,6 +11,7 @@ from jjdiff.change import (
     reverse_changes,
     split_changes,
 )
+from jjdiff.diff import diff
 
 from .utils import DirFactory, read_spec
 

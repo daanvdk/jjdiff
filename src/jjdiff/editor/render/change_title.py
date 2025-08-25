@@ -5,7 +5,6 @@ from jjdiff.tui.drawable import Drawable
 from jjdiff.tui.rows import Rows
 from jjdiff.tui.text import Text, TextColor, TextStyle
 
-
 from ...change import (
     FILE_CHANGE_TYPES,
     AddBinary,
@@ -23,7 +22,6 @@ from ...change import (
 )
 from .markers import SelectionMarker
 from .styles import SELECTED_BG
-
 
 type ChangeIncluded = Literal["full", "partial", "none"]
 

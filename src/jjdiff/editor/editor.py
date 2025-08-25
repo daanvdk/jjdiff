@@ -7,7 +7,6 @@ from jjdiff.tui.drawable import Drawable
 from jjdiff.tui.scroll import State
 from jjdiff.tui.text import TextStyle
 
-
 from ..change import (
     Change,
     ChangeRef,
@@ -15,10 +14,9 @@ from ..change import (
     get_all_refs,
     get_dependencies,
 )
-from .cursor import Cursor, ChangeCursor
+from .cursor import ChangeCursor, Cursor
 from .render.changes import render_changes
 from .render.markers import SelectionMarker
-
 
 SCROLLBAR_STYLE = TextStyle(fg="bright black")
 

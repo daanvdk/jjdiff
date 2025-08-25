@@ -28,10 +28,10 @@ jobs:
         run: uv sync --locked
 
       - name: Lint
-        run: poe lint
+        run: poe lint-check
 
       - name: Check formatting
-        run: poe format:check
+        run: poe format-check
 
       - name: Check types
         run: poe typecheck
