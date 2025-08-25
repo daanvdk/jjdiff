@@ -1,10 +1,12 @@
-from collections.abc import Iterable, Iterator, Sequence, Set
+from collections.abc import Iterable, Sequence, Set
 from dataclasses import dataclass
 import dataclasses
 from pathlib import Path
 import shutil
 import stat
 from typing import Literal
+
+from .deprioritize import is_path_deprioritized
 
 
 type LineStatus = Literal["added", "deleted", "changed", "unchanged"]
@@ -109,54 +111,83 @@ type Change = Rename | ChangeMode | FileChange | BinaryChange | SymlinkChange
 FILE_CHANGE_TYPES = (AddFile, ModifyFile, DeleteFile)
 
 
-def reverse_changes(changes: Iterable[Change]) -> Iterator[Change]:
+def reverse_changes(changes: Iterable[Change]) -> Sequence[Change]:
+    reversed_changes: list[Change] = []
     renames: dict[Path, Path] = {}
 
     for change in changes:
         match change:
             case Rename(old_path, new_path):
-                yield Rename(new_path, old_path)
+                reversed_changes.append(Rename(new_path, old_path))
                 renames[old_path] = new_path
 
             case ChangeMode(path, old_is_exec, new_is_exec):
                 path = renames.get(path, path)
-                yield ChangeMode(path, new_is_exec, old_is_exec)
+                reversed_changes.append(ChangeMode(path, new_is_exec, old_is_exec))
 
             case AddFile(path, lines, is_exec):
                 path = renames.get(path, path)
-                yield DeleteFile(path, reverse_lines(lines), is_exec)
+                reversed_changes.append(DeleteFile(path, reverse_lines(lines), is_exec))
 
             case ModifyFile(path, lines):
                 path = renames.get(path, path)
-                yield ModifyFile(path, reverse_lines(lines))
+                reversed_changes.append(ModifyFile(path, reverse_lines(lines)))
 
             case DeleteFile(path, lines, is_exec):
                 path = renames.get(path, path)
-                yield AddFile(path, reverse_lines(lines), is_exec)
+                reversed_changes.append(AddFile(path, reverse_lines(lines), is_exec))
 
             case AddBinary(path, content_path, is_exec):
                 path = renames.get(path, path)
-                yield DeleteBinary(path, content_path, is_exec)
+                reversed_changes.append(DeleteBinary(path, content_path, is_exec))
 
             case ModifyBinary(path, old_content_path, new_content_path):
                 path = renames.get(path, path)
-                yield ModifyBinary(path, new_content_path, old_content_path)
+                reversed_changes.append(
+                    ModifyBinary(path, new_content_path, old_content_path)
+                )
 
             case DeleteBinary(path, content_path, is_exec):
                 path = renames.get(path, path)
-                yield AddBinary(path, content_path, is_exec)
+                reversed_changes.append(AddBinary(path, content_path, is_exec))
 
             case AddSymlink(path, to):
                 path = renames.get(path, path)
-                yield DeleteSymlink(path, to)
+                reversed_changes.append(DeleteSymlink(path, to))
 
             case ModifySymlink(path, old_to, new_to):
                 path = renames.get(path, path)
-                yield ModifySymlink(path, new_to, old_to)
+                reversed_changes.append(ModifySymlink(path, new_to, old_to))
 
             case DeleteSymlink(path, to):
                 path = renames.get(path, path)
-                yield AddSymlink(path, to)
+                reversed_changes.append(AddSymlink(path, to))
+
+    reversed_changes.sort(key=change_key)
+    return reversed_changes
+
+
+def change_key(change: Change) -> tuple[bool, Path, int]:
+    match change:
+        case Rename(path):
+            priority = 0
+        case ChangeMode(path):
+            priority = 1
+        case DeleteFile(path) | DeleteBinary(path) | DeleteSymlink(path):
+            priority = 2
+        case ModifyFile(path) | ModifyBinary(path) | ModifySymlink(path):
+            priority = 3
+        case AddFile(path) | AddBinary(path) | AddSymlink(path):
+            priority = 4
+
+    return (is_change_deprioritized(change), path, priority)
+
+
+def is_change_deprioritized(change: Change) -> bool:
+    if isinstance(change, Rename):
+        return is_path_deprioritized(change.new_path)
+    else:
+        return is_path_deprioritized(change.path)
 
 
 def reverse_lines(lines: list[Line]) -> list[Line]:

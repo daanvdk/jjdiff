@@ -24,8 +24,8 @@ from .change import (
     ModifySymlink,
     DeleteSymlink,
     Line,
+    change_key,
 )
-from .deprioritize import is_change_deprioritized
 
 
 SIMILARITY_THRESHOLD = 0.6
@@ -143,22 +143,6 @@ def diff_contents(
 
     changes.sort(key=change_key)
     return changes
-
-
-def change_key(change: Change) -> tuple[bool, Path, int]:
-    match change:
-        case Rename(path):
-            priority = 0
-        case ChangeMode(path):
-            priority = 1
-        case DeleteFile(path) | DeleteBinary(path) | DeleteSymlink(path):
-            priority = 2
-        case ModifyFile(path) | ModifyBinary(path) | ModifySymlink(path):
-            priority = 3
-        case AddFile(path) | AddBinary(path) | AddSymlink(path):
-            priority = 4
-
-    return (is_change_deprioritized(change), path, priority)
 
 
 def diff_content(

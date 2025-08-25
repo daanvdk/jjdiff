@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Literal
 
-from jjdiff.deprioritize import is_change_deprioritized
 from jjdiff.tui.drawable import Drawable
 from jjdiff.tui.rows import Rows
 
@@ -21,6 +20,7 @@ from ...change import (
     ModifySymlink,
     Rename,
     get_change_refs,
+    is_change_deprioritized,
 )
 from ..cursor import Cursor
 from .change_title import render_change_title
@@ -46,7 +46,7 @@ def render_change(
     opened: bool,
     renames: dict[Path, Path],
 ) -> Drawable:
-    change_refs = get_change_refs(change_index, change)
+    change_refs = set(get_change_refs(change_index, change))
 
     change_included: ChangeIncluded | None
     if included is None:
