@@ -19,6 +19,7 @@ def add_key(raw_key: bytes, key: str) -> None:
     tree[raw_key[-1]] = key
 
 
+add_key(b"\x01", "ctrl+a")
 add_key(b"\x03", "ctrl+c")
 add_key(b"\x04", "ctrl+d")
 add_key(b"\x1b[A", "up")
@@ -28,6 +29,8 @@ add_key(b"\x1b[D", "left")
 add_key(b"\r", "enter")
 add_key(b"\t", "tab")
 add_key(b"\x1b[Z", "shift+tab")
+add_key(b"\x1b[H", "home")
+add_key(b"\x1b[F", "end")
 
 
 def get_char() -> int:

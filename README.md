@@ -20,10 +20,12 @@ This cursor can operate on 3 levels:
 | `exit` | `escape`, `ctrl+c` or `ctrl+d` | Exit the diff editor with status code 1, causing the diff to not be applied. |
 | `next_cursor` | `j`, `down` or `tab` | Select the next entry. |
 | `prev_cursor` | `k`, `up` or `shift+tab` | Select the previous entry. |
+| `first_cursor` | `g` or `home` | Select the first entry. |
+| `last_cursor` | `G` or `end` | Select the last entry. |
 | `shrink_cursor` | `l` or `right` | Shrink the cursor. So go from change to hunk and from hunk to line. If the cursor is on an unopened change it will open it first. |
 | `grow_cursor` | `h` or `left` | Grow the cursor. So go from line to hunk and from hunk to change. If the cursor is on an opened change it will close it. |
 | `select_cursor` | `space` | Mark everything selected by the cursor to be included. If everything is already marked it will exclude it instead. This will also select the next entry. |
-| `select_all` | `a` | Mark everything in the diff to be included. If everything is already marked it will exclude it instead. |
+| `select_all` | `a` or `ctrl+a` | Mark everything in the diff to be included. If everything is already marked it will exclude it instead. |
 | `confirm` | `enter` | Confirm the selected changes. | 
 | `undo` | `u` | Undo the last command. Commands that only affect the UI state like changing the cursor and opening/closing changes are not included in this. |
 | `redo` | `U` | Redo the last undone command. Commands that only affect the UI state like changing the cursor and opening/closing changes are not included in this. |

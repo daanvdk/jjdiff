@@ -39,6 +39,14 @@ class Cursor(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def first(self, changes: Sequence[Change], opened: set[ChangeRef]) -> "Cursor":
+        raise NotImplementedError
+
+    @abstractmethod
+    def last(self, changes: Sequence[Change], opened: set[ChangeRef]) -> "Cursor":
+        raise NotImplementedError
+
+    @abstractmethod
     def grow(
         self, changes: Sequence[Change], opened: set[ChangeRef]
     ) -> "Cursor | ChangeRef":
@@ -84,6 +92,14 @@ class ChangeCursor(Cursor):
     @override
     def prev(self, changes: Sequence[Change], opened: set[ChangeRef]) -> Cursor:
         return ChangeCursor((self.change - 1) % len(changes))
+
+    @override
+    def first(self, changes: Sequence[Change], opened: set[ChangeRef]) -> Cursor:
+        return ChangeCursor(0)
+
+    @override
+    def last(self, changes: Sequence[Change], opened: set[ChangeRef]) -> Cursor:
+        return ChangeCursor(len(changes) - 1)
 
     @override
     def grow(
@@ -227,6 +243,44 @@ class HunkCursor(Cursor):
             return HunkCursor(change_index, start, end)
 
     @override
+    def first(self, changes: Sequence[Change], opened: set[ChangeRef]) -> Cursor:
+        change_index = 0
+        while True:
+            change = changes[change_index]
+            if isinstance(change, FILE_CHANGE_TYPES):
+                break
+            change_index += 1
+
+        start = 0
+        while change.lines[start].status == "unchanged":
+            start += 1
+
+        end = start + 1
+        while end < len(change.lines) and change.lines[end].status != "unchanged":
+            end += 1
+
+        return HunkCursor(change_index, start, end)
+
+    @override
+    def last(self, changes: Sequence[Change], opened: set[ChangeRef]) -> Cursor:
+        change_index = len(changes) - 1
+        while True:
+            change = changes[change_index]
+            if isinstance(change, FILE_CHANGE_TYPES):
+                break
+            change_index -= 1
+
+        end = len(change.lines)
+        while change.lines[end - 1].status == "unchanged":
+            end -= 1
+
+        start = end - 1
+        while start > 0 and change.lines[start - 1].status != "unchanged":
+            start -= 1
+
+        return HunkCursor(change_index, start, end)
+
+    @override
     def grow(self, changes: Sequence[Change], opened: set[ChangeRef]) -> Cursor:
         return ChangeCursor(self.change)
 
@@ -323,6 +377,36 @@ class LineCursor(Cursor):
                 continue
 
             return LineCursor(change_index, line)
+
+    @override
+    def first(self, changes: Sequence[Change], opened: set[ChangeRef]) -> Cursor:
+        change_index = 0
+        while True:
+            change = changes[change_index]
+            if isinstance(change, FILE_CHANGE_TYPES):
+                break
+            change_index += 1
+
+        line = 0
+        while change.lines[line].status == "unchanged":
+            line += 1
+
+        return LineCursor(change_index, line)
+
+    @override
+    def last(self, changes: Sequence[Change], opened: set[ChangeRef]) -> Cursor:
+        change_index = len(changes) - 1
+        while True:
+            change = changes[change_index]
+            if isinstance(change, FILE_CHANGE_TYPES):
+                break
+            change_index -= 1
+
+        line = len(change.lines) - 1
+        while change.lines[line].status == "unchanged":
+            line -= 1
+
+        return LineCursor(change_index, line)
 
     @override
     def grow(self, changes: Sequence[Change], opened: set[ChangeRef]) -> Cursor:
