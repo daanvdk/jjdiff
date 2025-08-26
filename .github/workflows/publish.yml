@@ -1,0 +1,83 @@
+name: Tag and publish
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  tag:
+    name: Tag package version
+
+    runs-on: ubuntu-latest
+    outputs:
+      tagged_version: ${{ steps.tag_version.outputs.tagged_version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Tag package version
+        id: tag_version
+        run: |
+          VERSION="$(uv version --short)"
+          if git ls-remote --tags origin | grep -q "refs/tags/v$VERSION$"; then
+            echo "Tag v$VERSION already exists"
+            echo "tagged_version=" >> "$GITHUB_OUTPUT"
+          else
+            # todo tag and push tag
+            echo "Tag v$VERSION does not exist yet"
+            git tag -a v$VERSION -m "Release v$VERSION"
+            git push origin refs/tags/v$VERSION
+            echo "tagged_version=v$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build package
+    runs-on: ubuntu-latest
+    needs: [tag]
+    if: ${{ needs.tag.outputs.tagged_version != '' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Build package
+        run: uv build
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish:
+    name: Publish package
+
+    runs-on: ubuntu-latest
+    needs: [build]
+
+    environment:
+      name: publish
+      url: https://pypi.org/p/jjdiff
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish package
+        uses: pypa/gh-action-pypi-publish@release/v1
