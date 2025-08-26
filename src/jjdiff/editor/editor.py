@@ -118,6 +118,10 @@ class Editor(Console[Set[Ref] | None]):
                 self.prev_cursor()
             case "j" | "down" | "tab":
                 self.next_cursor()
+            case "g" | "home":
+                self.first_cursor()
+            case "G" | "end":
+                self.last_cursor()
             case "h" | "left":
                 self.grow_cursor()
             case "l" | "right":
@@ -144,6 +148,14 @@ class Editor(Console[Set[Ref] | None]):
 
     def next_cursor(self) -> None:
         self.cursor = self.cursor.next(self.changes, self.opened)
+        self.rerender()
+
+    def first_cursor(self) -> None:
+        self.cursor = self.cursor.first(self.changes, self.opened)
+        self.rerender()
+
+    def last_cursor(self) -> None:
+        self.cursor = self.cursor.last(self.changes, self.opened)
         self.rerender()
 
     def grow_cursor(self) -> None:
