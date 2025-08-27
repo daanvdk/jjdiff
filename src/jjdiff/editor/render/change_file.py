@@ -1,6 +1,6 @@
 from difflib import SequenceMatcher
 
-from jjdiff.config import load_config
+from jjdiff.config import get_config
 from jjdiff.tui.drawable import Drawable
 from jjdiff.tui.fill import Fill
 from jjdiff.tui.grid import Grid
@@ -270,5 +270,5 @@ def render_line_content(
 
 
 def normalize_text(line: str) -> str:
-    tab_repl = " " * load_config().format.tab_width
+    tab_repl = " " * get_config().format.tab_width
     return line.replace("\r", "").replace("\t", tab_repl)

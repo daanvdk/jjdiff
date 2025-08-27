@@ -54,3 +54,8 @@ certain files in diffs. Deprioritizing has the following effects:
 
 ### format.tab_width
 Controls as how many spaces a tab is formatted in the diff. Default is 4.
+
+### keybindings
+A dictionary mapping command names to lists of keys that should trigger the
+command. The default value for each command matches the keybindings table shown
+earlier in this document.
