@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - A new `first_cursor` action that will move the cursor to the first entry, this preserves the level. So if we have a hunk cursor this will select the first open hunk. It is bound to `g` and `home`.
 - A new `last_cursor` action that will move the cursor to the last entry, this preserves the level. So if we have a hunk cursor this will select the last open hunk. It is bound to `G` and `end`.
+- A `keybindings` setting that allows for customizing of the keybindings.
 
 ### Changed
 - The `select_all` action now also runs on `ctrl+a`.

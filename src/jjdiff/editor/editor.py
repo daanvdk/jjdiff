@@ -2,8 +2,10 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence, Set
 from typing import override
 
+from jjdiff.config import get_config
 from jjdiff.tui.console import Console
 from jjdiff.tui.drawable import Drawable
+from jjdiff.tui.keyboard import Key
 from jjdiff.tui.scroll import State
 from jjdiff.tui.text import TextStyle
 
@@ -110,34 +112,13 @@ class Editor(Console[Set[Ref] | None]):
         state.scroll_to(start, end)
 
     @override
-    def handle_key(self, key: str) -> None:
-        match key:
-            case "ctrl+c" | "ctrl+d" | "escape":
-                self.exit()
-            case "k" | "up" | "shift+tab":
-                self.prev_cursor()
-            case "j" | "down" | "tab":
-                self.next_cursor()
-            case "g" | "home":
-                self.first_cursor()
-            case "G" | "end":
-                self.last_cursor()
-            case "h" | "left":
-                self.grow_cursor()
-            case "l" | "right":
-                self.shrink_cursor()
-            case " ":
-                self.select_cursor()
-            case "a":
-                self.select_all()
-            case "enter":
-                self.confirm()
-            case "u":
-                self.undo()
-            case "U":
-                self.redo()
-            case _:
-                pass
+    def handle_key(self, key: Key) -> None:
+        try:
+            command = get_config().keymap[key]
+        except KeyError:
+            return
+        else:
+            getattr(self, command)()
 
     def exit(self) -> None:
         self.set_result(None)

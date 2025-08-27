@@ -9,7 +9,7 @@ from types import FrameType
 from typing import Final
 
 from .drawable import Drawable
-from .keyboard import Keyboard
+from .keyboard import Key, Keyboard
 from .scroll import Scroll, State
 from .text import DEFAULT_TEXT_STYLE, Text, TextStyle
 
@@ -52,7 +52,7 @@ class Console[Result](ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def handle_key(self, key: str) -> None:
+    def handle_key(self, key: Key) -> None:
         raise NotImplementedError
 
     def post_render(self, _state: State) -> None:

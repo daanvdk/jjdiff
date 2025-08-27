@@ -1,10 +1,10 @@
 from pathlib import Path
 
-from .config import load_config
+from .config import get_config
 
 
 def is_path_deprioritized(path: Path) -> bool:
-    for glob in load_config().diff.deprioritize:
+    for glob in get_config().diff.deprioritize:
         glob = gitglob_to_shellglob(glob)
         if path.match(glob):
             return True
