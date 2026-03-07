@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - The `select_all` action now also runs on `ctrl+a`.
+- Significantly sped up line diffing by using `SequenceMatcher` for global structure and only running the precise similarity-based alignment on changed blocks. Lines that differ only in indentation are now shown as changed lines with character-level highlighting rather than as unrelated deletions and insertions.
+- Significantly sped up rename detection by computing a content summary (line counts for text files, chunk hashes for binary files) once per file rather than once per candidate pair, and skipping pairs whose size ratio makes the similarity threshold unreachable.
 
 ## [0.4.0] - 2025-08-26
 ### Added

@@ -28,6 +28,11 @@ from .change import (
 )
 
 SIMILARITY_THRESHOLD = 0.6
+SIMILARITY_MIN_RATIO = SIMILARITY_THRESHOLD / (2 - SIMILARITY_THRESHOLD)
+
+
+def ratio(old_total: int, new_total: int) -> float:
+    return min(old_total, new_total) / max(old_total, new_total)
 
 
 @dataclass
@@ -42,6 +47,7 @@ class Symlink:
 
 
 type Content = File | Symlink
+type ContentSummary = Counter[str] | frozenset[bytes] | str
 
 
 def diff(old_root: Path, new_root: Path) -> list[Change]:
@@ -111,14 +117,20 @@ def diff_contents(
     # Now we try to find renames between the old and new paths
     renames: list[tuple[float, Path, Path]] = []
 
-    for (old_path, old_content), (new_path, new_content) in product(
-        deleted.items(), added.items()
+    old_summaries = {
+        path: get_content_summary(content) for path, content in deleted.items()
+    }
+    new_summaries = {
+        path: get_content_summary(content) for path, content in added.items()
+    }
+
+    for (old_path, old_summary), (new_path, new_summary) in product(
+        old_summaries.items(), new_summaries.items()
     ):
-        similarity = get_content_similarity(old_content, new_content)
+        similarity = get_summary_similarity(old_summary, new_summary)
         if similarity >= SIMILARITY_THRESHOLD:
             heapq.heappush(renames, (-similarity, old_path, new_path))
 
-    renamed: dict[Path, Path] = {}
     while renames:
         _, old_path, new_path = heapq.heappop(renames)
 
@@ -131,7 +143,6 @@ def diff_contents(
 
         changes.append(Rename(old_path, new_path))
         changes.extend(diff_content(old_path, old_content, new_content))
-        renamed[old_path] = new_path
 
     # All the rest we can delete/add
     for path, content in deleted.items():
@@ -208,25 +219,48 @@ def content_is_equal(old_content: Path, new_content: Path) -> bool:
         return old_data == new_data
 
 
-def get_content_similarity(old_content: Content, new_content: Content) -> float:
-    match old_content, new_content:
-        case File(old_content_path), File(new_content_path):
-            if content_is_equal(old_content_path, new_content_path):
-                return 1
+def get_content_summary(content: Content) -> ContentSummary:
+    match content:
+        case File(content_path, _):
+            if lines := split_lines(content_path):
+                return get_line_counts(lines)
+            else:
+                return frozenset(map(stable_hash, get_binary_chunks(content_path)))
+        case Symlink(to):
+            return str(to)
 
-            match split_lines(old_content_path), split_lines(new_content_path):
-                case list(old_lines), list(new_lines):
-                    return get_text_similarity(old_lines, new_lines)
-                case None, None:
-                    return get_binary_similarity(old_content_path, new_content_path)
-                case _:
-                    return 0
 
-        case Symlink(old_to), Symlink(new_to):
-            return get_line_similarity(str(old_to), str(new_to))
+def get_summary_similarity(old: ContentSummary, new: ContentSummary) -> float:
+    match old, new:
+        case Counter(), Counter():
+            old_total = old.total()
+            new_total = new.total()
+            total = old_total + new_total
+
+            if total == 0:
+                return 1.0
+            elif ratio(old_total, new_total) < SIMILARITY_MIN_RATIO:
+                return 0.0
+            else:
+                return (old & new).total() * 2 / total
+
+        case frozenset(), frozenset():
+            old_total = len(old)
+            new_total = len(new)
+            total = old_total + new_total
+
+            if total == 0:
+                return 1.0
+            elif ratio(old_total, new_total) < SIMILARITY_MIN_RATIO:
+                return 0.0
+            else:
+                return len(old & new) * 2 / total
+
+        case str(), str():
+            return get_line_similarity(old, new)
 
         case _:
-            return 0
+            return 0.0
 
 
 def split_lines(path: Path) -> list[str] | None:
@@ -249,20 +283,8 @@ def split_lines(path: Path) -> list[str] | None:
     return lines
 
 
-def get_text_similarity(old_lines: list[str], new_lines: list[str]) -> float:
-    old_counts = get_line_counts(old_lines)
-    new_counts = get_line_counts(new_lines)
-
-    total = old_counts.total() + new_counts.total()
-    if total == 0:
-        return 1
-
-    common = (old_counts & new_counts).total()
-    return common * 2 / total
-
-
 def get_line_counts(lines: list[str]) -> Counter[str]:
-    counts = Counter[str]()
+    counts: Counter[str] = Counter()
 
     for line in lines:
         line = line.strip()
@@ -270,18 +292,6 @@ def get_line_counts(lines: list[str]) -> Counter[str]:
             counts[line] += 1
 
     return counts
-
-
-def get_binary_similarity(old_content_path: Path, new_content_path: Path) -> float:
-    old_chunks = set(map(stable_hash, get_binary_chunks(old_content_path)))
-    new_chunks = set(map(stable_hash, get_binary_chunks(new_content_path)))
-
-    total = len(old_chunks) + len(new_chunks)
-    if total == 0:
-        return 1
-
-    common = len(old_chunks & new_chunks)
-    return common * 2 / total
 
 
 WINDOW_SIZE = 48
@@ -363,23 +373,30 @@ def get_line_similarity(old: str, new: str) -> float:
 
 
 def diff_lines(old: list[str], new: list[str]) -> list[Line]:
-    start = 0
-    while start < len(old) and start < len(new) and old[start] == new[start]:
-        start += 1
+    old_stripped = [line.lstrip() for line in old]
+    new_stripped = [line.lstrip() for line in new]
 
-    old_end = len(old)
-    new_end = len(new)
-    while old_end > start and new_end > start and old[old_end - 1] == new[new_end - 1]:
-        old_end -= 1
-        new_end -= 1
+    matcher = SequenceMatcher(None, old_stripped, new_stripped, autojunk=False)
+    lines: list[Line] = []
 
-    lines = [Line(line, line) for line in old[:start]]
-    lines.extend(diff_lines_base(old[start:old_end], new[start:new_end]))
-    lines.extend(Line(line, line) for line in old[old_end:])
+    for op, i1, i2, j1, j2 in matcher.get_opcodes():
+        match op:
+            case "equal":
+                lines.extend(
+                    Line(old_line, new_line)
+                    for old_line, new_line in zip(old[i1:i2], new[j1:j2])
+                )
+            case "insert":
+                lines.extend(Line(None, line) for line in new[j1:j2])
+            case "delete":
+                lines.extend(Line(line, None) for line in old[i1:i2])
+            case "replace":
+                lines.extend(diff_lines_precise(old[i1:i2], new[j1:j2]))
+
     return lines
 
 
-def diff_lines_base(old: list[str], new: list[str]) -> list[Line]:
+def diff_lines_precise(old: list[str], new: list[str]) -> list[Line]:
     min_cost = 100 * abs(len(old) - len(new))
     states: list[tuple[int, int, int, int, Line | None]] = [(min_cost, 0, 0, 0, None)]
     line_to: dict[tuple[int, int], Line | None] = {}
@@ -441,7 +458,7 @@ def diff_lines_base(old: list[str], new: list[str]) -> list[Line]:
         if old_todo and new_todo:
             old_line = old[old_index]
             new_line = new[new_index]
-            similarity = get_line_similarity(old_line, new_line)
+            similarity = get_line_similarity(old_line.lstrip(), new_line.lstrip())
 
             if similarity >= SIMILARITY_THRESHOLD:
                 heapq.heappush(
