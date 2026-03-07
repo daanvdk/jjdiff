@@ -31,6 +31,8 @@ jobs:
           else
             # todo tag and push tag
             echo "Tag v$VERSION does not exist yet"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
             git tag -a v$VERSION -m "Release v$VERSION"
             git push origin refs/tags/v$VERSION
             echo "tagged_version=v$VERSION" >> "$GITHUB_OUTPUT"
