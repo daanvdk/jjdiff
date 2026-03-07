@@ -29,6 +29,8 @@ This cursor can operate on 3 levels:
 | `confirm` | `enter` | Confirm the selected changes. | 
 | `undo` | `u` | Undo the last command. Commands that only affect the UI state like changing the cursor and opening/closing changes are not included in this. |
 | `redo` | `U` | Redo the last undone command. Commands that only affect the UI state like changing the cursor and opening/closing changes are not included in this. |
+| `open_all` | `o` | Open all changes. |
+| `close_all` | `O` | Close all changes. |
 
 ## Usage
 jjdiff is available on pypi. You can use any way you are comfortable installing
@@ -43,14 +45,23 @@ diff-formatter = ["jjdiff", "--print", "$left", "$right"]  # to also format diff
 ```
 
 ## Configuration
-jjdiff can be configured in `~/.config/jjdiff/config.toml` with the following
-configuration options.
+jjdiff can be configured in `~/.config/jjdiff/config.toml` or at
+`$XDG_CONFIG_HOME/jjdiff/config.toml` if set. The following configuration
+options are supported:
 
 ### diff.deprioritize
 This contains a list of gitignore style globs that can be used to deprioritize
 certain files in diffs. Deprioritizing has the following effects:
 - Deprioritized files are always at the end of the diff.
 - In `jjdiff --print` the changes in deprioritized files are not shown.
+
+### editor.default_open
+Controls if changes are by default open or closed. Deprioritized files will
+remain closed by default even if this setting is set to true. Default is false.
+
+### editor.auto_open
+When navigating away from an opened change, automatically closes it and opens
+the next one. Default is false.
 
 ### format.tab_width
 Controls as how many spaces a tab is formatted in the diff. Default is 4.

@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
 from typing import cast, override
 
+from jjdiff.config import get_config
+
 from ..change import (
     FILE_CHANGE_TYPES,
     Change,
@@ -14,6 +16,11 @@ from ..change import (
 
 
 class Cursor(ABC):
+    change: int
+
+    def __init__(self, change: int) -> None:
+        self.change = change
+
     @abstractmethod
     def is_change_selected(self, change: int) -> bool:
         raise NotImplementedError
@@ -64,11 +71,6 @@ class Cursor(ABC):
 
 
 class ChangeCursor(Cursor):
-    change: int
-
-    def __init__(self, change: int):
-        self.change = change
-
     @override
     def is_change_selected(self, change: int) -> bool:
         return self.change == change
@@ -144,12 +146,11 @@ class ChangeCursor(Cursor):
 
 
 class HunkCursor(Cursor):
-    change: int
     start: int
     end: int
 
     def __init__(self, change: int, start: int, end: int):
-        self.change = change
+        super().__init__(change)
         self.start = start
         self.end = end
 
@@ -190,7 +191,10 @@ class HunkCursor(Cursor):
                 # and a file change (HunkCursor requires it).
                 while True:
                     change_index = (change_index - 1) % len(changes)
-                    if ChangeRef(change_index) not in opened:
+                    if (
+                        ChangeRef(change_index) not in opened
+                        and not get_config().editor.auto_open
+                    ):
                         continue
 
                     prev_change = changes[change_index]
@@ -228,7 +232,10 @@ class HunkCursor(Cursor):
                 # file change (HunkCursor requires it).
                 while True:
                     change_index = (change_index + 1) % len(changes)
-                    if ChangeRef(change_index) not in opened:
+                    if (
+                        ChangeRef(change_index) not in opened
+                        and not get_config().editor.auto_open
+                    ):
                         continue
 
                     next_change = changes[change_index]
@@ -298,11 +305,10 @@ class HunkCursor(Cursor):
 
 
 class LineCursor(Cursor):
-    change: int
     line: int
 
     def __init__(self, change: int, line: int):
-        self.change = change
+        super().__init__(change)
         self.line = line
 
     @override
@@ -340,7 +346,10 @@ class LineCursor(Cursor):
                 # and a file change (LineCursor requires it).
                 while True:
                     change_index = (change_index - 1) % len(changes)
-                    if ChangeRef(change_index) not in opened:
+                    if (
+                        ChangeRef(change_index) not in opened
+                        and not get_config().editor.auto_open
+                    ):
                         continue
 
                     prev_change = changes[change_index]
@@ -371,7 +380,10 @@ class LineCursor(Cursor):
                 # file change (LineCursor requires it).
                 while True:
                     change_index = (change_index + 1) % len(changes)
-                    if ChangeRef(change_index) not in opened:
+                    if (
+                        ChangeRef(change_index) not in opened
+                        and not get_config().editor.auto_open
+                    ):
                         continue
 
                     next_change = changes[change_index]

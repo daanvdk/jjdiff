@@ -15,6 +15,7 @@ from ..change import (
     Ref,
     get_all_refs,
     get_dependencies,
+    is_change_deprioritized,
 )
 from .cursor import ChangeCursor, Cursor
 from .render.changes import render_changes
@@ -99,6 +100,13 @@ class Editor(Console[Set[Ref] | None]):
         if not changes:
             self.set_result(frozenset())
 
+        if get_config().editor.default_open:
+            self.opened.update(
+                ChangeRef(change_index)
+                for change_index, change in enumerate(changes)
+                if not is_change_deprioritized(change)
+            )
+
     @override
     def render(self) -> Drawable:
         return render_changes(self.changes, self.cursor, self.included, self.opened)
@@ -124,19 +132,27 @@ class Editor(Console[Set[Ref] | None]):
         self.set_result(None)
 
     def prev_cursor(self) -> None:
-        self.cursor = self.cursor.prev(self.changes, self.opened)
-        self.rerender()
+        self.move_cursor(self.cursor.prev(self.changes, self.opened))
 
     def next_cursor(self) -> None:
-        self.cursor = self.cursor.next(self.changes, self.opened)
-        self.rerender()
+        self.move_cursor(self.cursor.next(self.changes, self.opened))
 
     def first_cursor(self) -> None:
-        self.cursor = self.cursor.first(self.changes, self.opened)
-        self.rerender()
+        self.move_cursor(self.cursor.first(self.changes, self.opened))
 
     def last_cursor(self) -> None:
-        self.cursor = self.cursor.last(self.changes, self.opened)
+        self.move_cursor(self.cursor.last(self.changes, self.opened))
+
+    def move_cursor(self, new_cursor: Cursor) -> None:
+        if (
+            new_cursor.change != self.cursor.change
+            and get_config().editor.auto_open
+            and ChangeRef(self.cursor.change) in self.opened
+        ):
+            self.opened.remove(ChangeRef(self.cursor.change))
+            self.opened.add(ChangeRef(new_cursor.change))
+
+        self.cursor = new_cursor
         self.rerender()
 
     def grow_cursor(self) -> None:
@@ -158,10 +174,12 @@ class Editor(Console[Set[Ref] | None]):
     def select_cursor(self) -> None:
         refs = self.cursor.refs(self.changes)
         self.select_refs(refs)
+        self.next_cursor()
 
     def select_all(self) -> None:
         refs = get_all_refs(self.changes)
         self.select_refs(refs)
+        self.rerender()
 
     def select_refs(self, refs: Iterable[Ref]) -> None:
         refs = set(refs)
@@ -196,9 +214,6 @@ class Editor(Console[Set[Ref] | None]):
 
             self.apply_action(RemoveIncludes(refs))
 
-        self.rerender()
-        self.next_cursor()
-
     def undo(self) -> None:
         try:
             action, opened, cursor = self.undo_stack.pop()
@@ -221,6 +236,17 @@ class Editor(Console[Set[Ref] | None]):
         action.apply(self)
         self.opened = opened
         self.cursor = cursor
+        self.rerender()
+
+    def open_all(self) -> None:
+        self.opened.update(
+            ChangeRef(change_index) for change_index in range(len(self.changes))
+        )
+        self.rerender()
+
+    def close_all(self) -> None:
+        self.cursor = ChangeCursor(self.cursor.change)
+        self.opened.clear()
         self.rerender()
 
     def confirm(self) -> None:

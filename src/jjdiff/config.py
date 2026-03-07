@@ -12,6 +12,11 @@ class DiffConfig(BaseModel):
     deprioritize: list[str] = []
 
 
+class EditorConfig(BaseModel):
+    default_open: bool = False
+    auto_open: bool = False
+
+
 class FormatConfig(BaseModel):
     tab_width: int = 4
 
@@ -29,10 +34,13 @@ class KeybindingsConfig(BaseModel):
     confirm: list[Key] = ["enter"]
     undo: list[Key] = ["u"]
     redo: list[Key] = ["U"]
+    open_all: list[Key] = ["o"]
+    close_all: list[Key] = ["O"]
 
 
 class Config(BaseModel):
     diff: DiffConfig = DiffConfig()
+    editor: EditorConfig = EditorConfig()
     format: FormatConfig = FormatConfig()
     keybindings: KeybindingsConfig = KeybindingsConfig()
 
