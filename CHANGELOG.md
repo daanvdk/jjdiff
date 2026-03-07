@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+### Added
+- A new `open_all` action that opens all changes, bound to `o`.
+- A new `close_all` action that closes all changes, bound to `O`.
+- A new `editor.default_open` setting to control whether changes are open or closed by default. Deprioritized files remain closed regardless. Default is false.
+- A new `editor.auto_open` setting that, when navigating away from an opened change, automatically closes it and opens the next one. Default is false.
+
+### Changed
+- `select_all` no longer advances the cursor after toggling.
+
 ## [0.5.0] - 2026-03-07
 ### Fixed
 - Fixed a bug where comparing two empty files would crash due to `mmap` not supporting zero-length mappings.
@@ -57,6 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial version of the application.
 
+[Unreleased]: https://github.com/daanvdk/jjdiff/compare/v0.5.0...HEAD
 [0.5.0]: https://github.com/daanvdk/jjdiff/compare/v0.3.0...v0.5.0
 [0.4.0]: https://github.com/daanvdk/jjdiff/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/daanvdk/jjdiff/compare/v0.2.0...v0.3.0
