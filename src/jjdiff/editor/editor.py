@@ -141,16 +141,16 @@ class Editor(Console[Set[Ref] | None]):
 
     def grow_cursor(self) -> None:
         match self.cursor.grow(self.changes, self.opened):
-            case ChangeRef(change_index):
-                self.opened.remove(ChangeRef(change_index))
+            case ChangeRef() as ref:
+                self.opened.remove(ref)
             case cursor:
                 self.cursor = cursor
         self.rerender()
 
     def shrink_cursor(self) -> None:
         match self.cursor.shrink(self.changes, self.opened):
-            case ChangeRef(change_index):
-                self.opened.add(ChangeRef(change_index))
+            case ChangeRef() as ref:
+                self.opened.add(ref)
             case cursor:
                 self.cursor = cursor
         self.rerender()
