@@ -186,7 +186,8 @@ class HunkCursor(Cursor):
                 end -= 1
             else:
                 # No hunk found, so go to the previous file change and try
-                # again
+                # again. This always terminates because self.change is opened
+                # and a file change (HunkCursor requires it).
                 while True:
                     change_index = (change_index - 1) % len(changes)
                     if ChangeRef(change_index) not in opened:
@@ -222,7 +223,9 @@ class HunkCursor(Cursor):
                     break
                 start += 1
             else:
-                # No hunk found, so go to the next file change and try again
+                # No hunk found, so go to the next file change and try again.
+                # This always terminates because self.change is opened and a
+                # file change (HunkCursor requires it).
                 while True:
                     change_index = (change_index + 1) % len(changes)
                     if ChangeRef(change_index) not in opened:
@@ -333,7 +336,8 @@ class LineCursor(Cursor):
                     break
             else:
                 # No line found, so go to the previous file change and try
-                # again
+                # again. This always terminates because self.change is opened
+                # and a file change (LineCursor requires it).
                 while True:
                     change_index = (change_index - 1) % len(changes)
                     if ChangeRef(change_index) not in opened:
@@ -362,8 +366,9 @@ class LineCursor(Cursor):
                 if change.lines[line].status != "unchanged":
                     break
             else:
-                # No line found, so go to the previous file change and try
-                # again
+                # No line found, so go to the next file change and try again.
+                # This always terminates because self.change is opened and a
+                # file change (LineCursor requires it).
                 while True:
                     change_index = (change_index + 1) % len(changes)
                     if ChangeRef(change_index) not in opened:

@@ -168,10 +168,10 @@ class Editor(Console[Set[Ref] | None]):
         new_refs = refs - self.included
 
         if new_refs:
-            # Ensure we also include all dependencies
+            # Ensure we also include all dependencies (transitively)
             while dependencies := {
                 dependency
-                for dependant in refs
+                for dependant in new_refs
                 for dependency in self.include_dependencies.get(dependant, set())
                 if dependency not in new_refs
             }:

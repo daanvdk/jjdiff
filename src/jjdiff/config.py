@@ -39,7 +39,6 @@ class Config(BaseModel):
     @computed_field
     @cached_property
     def keymap(self) -> dict[Key, str]:
-        print("setting keymap")
         keymap: dict[Key, str] = {}
 
         for command in KeybindingsConfig.model_fields:
