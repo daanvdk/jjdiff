@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 ### Fixed
 - Fixed a bug where comparing two empty files would crash due to `mmap` not supporting zero-length mappings.
+- Fixed text rendering to correctly handle character widths of special characters.
 
 ### Added
 - A new `first_cursor` action that will move the cursor to the first entry, this preserves the level. So if we have a hunk cursor this will select the first open hunk. It is bound to `g` and `home`.

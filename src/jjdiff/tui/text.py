@@ -1,6 +1,15 @@
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
-from typing import Literal, overload, override
+from typing import TYPE_CHECKING, Literal, overload, override
+
+from wcwidth import wcswidth
+
+if TYPE_CHECKING:
+
+    def graphemes(_: str) -> Iterator[str]: ...
+else:
+    from grapheme import graphemes  # type: ignore[import-untyped]
+
 
 from .drawable import Drawable
 
@@ -143,16 +152,18 @@ class Text(Drawable):
     spans: tuple[TextSpan, ...]
 
     @overload
-    def __init__(self, content: str = "", style: TextStyle | None = None) -> None: ...
+    def __init__(
+        self, content: str = "", style: TextStyle = DEFAULT_TEXT_STYLE
+    ) -> None: ...
     @overload
     def __init__(self, content: tuple[TextSpan, ...]) -> None: ...
     def __init__(
         self,
         content: str | tuple[TextSpan, ...] = "",
-        style: TextStyle | None = None,
+        style: TextStyle = DEFAULT_TEXT_STYLE,
     ) -> None:
         if isinstance(content, str):
-            content = (TextSpan(content, style or DEFAULT_TEXT_STYLE),)
+            content = (TextSpan(content, style),)
         self.spans = content
 
     def __add__(self, other: "Text") -> "Text":
@@ -178,83 +189,70 @@ class Text(Drawable):
         curr_width = 0
 
         for span in self.spans:
-            first = True
-
-            for part in span.content.split("\n"):
-                if first:
-                    first = False
-                else:
+            for cluster in graphemes(span.content):
+                if cluster == "\n":
+                    max_width = max(max_width, curr_width)
                     curr_width = 0
+                    continue
 
-                curr_width += len(part)
-                max_width = max(max_width, curr_width)
+                cluster_width = wcswidth(cluster)
+                if cluster_width < 0:
+                    cluster_width = 1
 
-        return max_width
+                curr_width += cluster_width
+
+        return max(max_width, curr_width)
 
     @override
     def _render(self, width: int, height: int | None) -> Iterator[str]:
-        line: list[str] = []
+        curr_span = TextSpan("", DEFAULT_TEXT_STYLE)
+        curr_line: list[str] = []
+        curr_style = DEFAULT_TEXT_STYLE
         x = 0
-        y = 0
 
-        def get_line() -> str:
-            nonlocal x, y
+        def ensure_style(style: TextStyle) -> None:
+            nonlocal curr_style
+
+            if curr_style != style:
+                curr_line.append(curr_style.reset_code)
+                curr_style = style
+                curr_line.append(curr_style.style_code)
+
+        def flush_line() -> str:
+            nonlocal curr_span, curr_style, x
 
             if x < width:
-                filler = " " * (width - x)
-                if line:
-                    line.insert(-1, filler)
-                else:
-                    style = self.spans[-1].style
-                    line.append(style.style_code)
-                    line.append(filler)
-                    line.append(style.reset_code)
+                ensure_style(curr_span.style)
+                curr_line.extend(" " for _ in range(x, width))
+            curr_line.append(curr_style.reset_code)
+            line = "".join(curr_line)
 
-            res = "".join(line)
-            line.clear()
+            curr_line.clear()
+            curr_style = DEFAULT_TEXT_STYLE
             x = 0
-            y += 1
 
-            return res
+            return line
 
-        for span in self.spans:
-            index = 0
+        for curr_span in self.spans:
+            for cluster in graphemes(curr_span.content):
+                # Handle newline
+                if cluster == "\n":
+                    yield flush_line()
+                    continue
 
-            if len(span.content) == 0:
-                line.append(span.style.style_code)
-                line.append(span.content)
-                line.append(span.style.reset_code)
+                cluster_width = wcswidth(cluster)
 
-            while index < len(span.content):
-                max_len = width - x
+                # Handle characters that are not renderable or will never fit
+                if cluster_width < 0 or cluster_width > width:
+                    cluster = "?"
+                    cluster_width = 1
 
-                try:
-                    newline_index = span.content.index("\n", index, index + max_len + 1)
-                except ValueError:
-                    if index + max_len < len(span.content):
-                        # wraps
-                        content = span.content[index : index + max_len]
-                        newline = True
-                        index += max_len
-                    else:
-                        # fits
-                        content = span.content[index:]
-                        newline = False
-                        index = len(span.content)
-                else:
-                    # newline
-                    content = span.content[index:newline_index]
-                    newline = True
-                    index = newline_index + 1
+                # Handle line wrap if character does not fit
+                if x + cluster_width > width:
+                    yield flush_line()
 
-                line.append(span.style.style_code)
-                line.append(content)
-                line.append(span.style.reset_code)
-                x += len(content)
+                ensure_style(curr_span.style)
+                curr_line.append(cluster)
+                x += cluster_width
 
-                if newline:
-                    yield get_line()
-                    if y == height:
-                        return
-
-        yield get_line()
+        yield flush_line()
