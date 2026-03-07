@@ -190,8 +190,13 @@ def diff_content(
 
 def content_is_equal(old_content: Path, new_content: Path) -> bool:
     # Different size is never equal
-    if old_content.stat().st_size != new_content.stat().st_size:
+    old_size = old_content.stat().st_size
+    if old_size != new_content.stat().st_size:
         return False
+
+    # Empty files are equal
+    if old_size == 0:
+        return True
 
     # Compare content through mmap
     with (
