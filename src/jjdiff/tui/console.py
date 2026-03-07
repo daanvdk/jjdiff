@@ -122,6 +122,7 @@ class Console[Result](ABC):
                 if self._redraw:
                     self._redraw = False
                     self._draw()
+                    continue
 
                 # Check for input
                 try:
