@@ -392,7 +392,7 @@ def get_all_refs(changes: Iterable[Change]) -> Iterator[Ref]:
 type Dep = tuple[Ref, Ref]
 
 
-def get_dependencies(changes: Iterable[Change]) -> Iterator[Dep]:
+def get_dependencies(changes: Sequence[Change]) -> Iterator[Dep]:
     yield from get_path_dependencies(changes)
     yield from get_line_dependencies(changes)
 
