@@ -16,7 +16,12 @@ from .utils import DirFactory, DirSpec, write_spec
 @pytest.fixture(autouse=True)
 def config() -> Iterator[Config]:
     config = Config()
-    with patch("jjdiff.config.get_config", return_value=config):
+    with (
+        patch("jjdiff.config.get_config", return_value=config),
+        patch("jjdiff.editor.editor.get_config", return_value=config),
+        patch("jjdiff.editor.cursor.get_config", return_value=config),
+        patch("jjdiff.editor.render.change_file.get_config", return_value=config),
+    ):
         yield config
 
 

@@ -5,7 +5,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, computed_field
 
-from jjdiff.tui.keyboard import Key
+from .pattern import Pattern
+from .tui.keyboard import Key
 
 
 class DiffConfig(BaseModel):
@@ -63,6 +64,11 @@ class Config(BaseModel):
 
         return keymap
 
+    @computed_field
+    @cached_property
+    def deprioritize_patterns(self) -> list[Pattern]:
+        return list(map(Pattern.compile, self.diff.deprioritize))
+
 
 def get_config_path() -> Path:
     try:
@@ -84,23 +90,5 @@ def get_config() -> Config:
         return Config.model_validate(data)
 
 
-def path_deprioritized(path: Path) -> bool:
-    for glob in get_config().diff.deprioritize:
-        glob = gitglob_to_shellglob(glob)
-        if path.match(glob):
-            return True
-    return False
-
-
-def gitglob_to_shellglob(glob: str) -> str:
-    # git globs need a leading slash to be anchored to the root
-    if glob.startswith("/"):
-        glob = glob[1:]
-    else:
-        glob = f"**/{glob}"
-
-    # a trailing slash should include everything in the directory
-    if glob.endswith("/"):
-        glob = f"{glob}**"
-
-    return glob
+def is_path_deprioritized(path: Path) -> bool:
+    return any(pattern.match(path) for pattern in get_config().deprioritize_patterns)

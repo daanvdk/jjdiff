@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from .deprioritize import is_path_deprioritized
+from .config import is_path_deprioritized
 
 type LineStatus = Literal["added", "deleted", "changed", "unchanged"]
 

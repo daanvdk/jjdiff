@@ -1,13 +1,23 @@
 from pathlib import Path
 
 from jjdiff.change import (
+    AddBinary,
     AddFile,
+    AddSymlink,
+    ChangeMode,
     ChangeRef,
+    DeleteBinary,
     DeleteFile,
+    DeleteSymlink,
     Line,
     LineRef,
+    ModifyBinary,
     ModifyFile,
+    ModifySymlink,
+    Rename,
     apply_changes,
+    get_line_dependencies,
+    get_path_dependencies,
     reverse_changes,
     split_changes,
 )
@@ -77,3 +87,92 @@ def test_usecase(temp_dir_factory: DirFactory) -> None:
 
     apply_changes(new, new_to_sel)
     assert read_spec(new) == {"foo.txt": "foo\nbaz"}
+
+
+# --- reverse_changes: non-file types ---
+
+
+def test_reverse_changes_rename() -> None:
+    changes = [Rename(Path("a.py"), Path("b.py"))]
+    result = list(reverse_changes(changes))
+    assert result == [Rename(Path("b.py"), Path("a.py"))]
+
+
+def test_reverse_changes_change_mode() -> None:
+    changes = [ChangeMode(Path("a.py"), False, True)]
+    result = list(reverse_changes(changes))
+    assert result == [ChangeMode(Path("a.py"), True, False)]
+
+
+def test_reverse_changes_add_binary() -> None:
+    changes = [AddBinary(Path("img.png"), Path("/tmp/f"), False)]
+    result = list(reverse_changes(changes))
+    assert result == [DeleteBinary(Path("img.png"), Path("/tmp/f"), False)]
+
+
+def test_reverse_changes_modify_binary() -> None:
+    changes = [ModifyBinary(Path("img.png"), Path("/tmp/old"), Path("/tmp/new"))]
+    result = list(reverse_changes(changes))
+    assert result == [ModifyBinary(Path("img.png"), Path("/tmp/new"), Path("/tmp/old"))]
+
+
+def test_reverse_changes_delete_binary() -> None:
+    changes = [DeleteBinary(Path("img.png"), Path("/tmp/f"), False)]
+    result = list(reverse_changes(changes))
+    assert result == [AddBinary(Path("img.png"), Path("/tmp/f"), False)]
+
+
+def test_reverse_changes_symlinks() -> None:
+    changes = [
+        AddSymlink(Path("link1"), Path("/target1")),
+        ModifySymlink(Path("link2"), Path("/old_target"), Path("/new_target")),
+        DeleteSymlink(Path("link3"), Path("/target3")),
+    ]
+    result = list(reverse_changes(changes))
+    assert DeleteSymlink(Path("link1"), Path("/target1")) in result
+    assert (
+        ModifySymlink(Path("link2"), Path("/new_target"), Path("/old_target")) in result
+    )
+    assert AddSymlink(Path("link3"), Path("/target3")) in result
+
+
+# --- split_changes: non-file types ---
+
+
+def test_split_changes_rename_included() -> None:
+    changes = [Rename(Path("old.py"), Path("new.py"))]
+    refs = {ChangeRef(0)}
+    old_to_sel, sel_to_new = split_changes(changes, refs)
+    assert old_to_sel == [Rename(Path("old.py"), Path("new.py"))]
+    assert sel_to_new == []
+
+
+def test_split_changes_rename_excluded() -> None:
+    changes = [Rename(Path("old.py"), Path("new.py"))]
+    refs: set = set()
+    old_to_sel, sel_to_new = split_changes(changes, refs)
+    assert old_to_sel == []
+    assert sel_to_new == [Rename(Path("old.py"), Path("new.py"))]
+
+
+# --- get_path_dependencies ---
+
+
+def test_get_path_dependencies_delete_then_add() -> None:
+    changes = [
+        DeleteFile(Path("a.py"), [Line("x", None)], False),
+        AddFile(Path("a.py"), [Line(None, "y")], False),
+    ]
+    deps = list(get_path_dependencies(changes))
+    assert (ChangeRef(1), ChangeRef(0)) in deps
+
+
+# --- get_line_dependencies ---
+
+
+def test_get_line_dependencies_delete_file() -> None:
+    changes = [
+        DeleteFile(Path("a.py"), [Line("x", None)], False),
+    ]
+    deps = list(get_line_dependencies(changes))
+    assert (ChangeRef(0), LineRef(0, 0)) in deps
