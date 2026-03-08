@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `select_all` no longer advances the cursor after toggling.
 
+### Fixed
+- Fixed a bug where binary files would cause crashes on diffing.
+
 ## [0.5.0] - 2026-03-07
 ### Fixed
 - Fixed a bug where comparing two empty files would crash due to `mmap` not supporting zero-length mappings.
