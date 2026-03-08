@@ -22,10 +22,22 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "coverage[toml]>=7.0",
+    "pytest-cov>=6.0",
     "pyright>=1.1.403",
     "pytest>=8.4.1",
     "ruff>=0.12.5",
 ]
+
+[tool.pytest.ini_options]
+addopts = "--cov=jjdiff --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["src/jjdiff"]
+omit = ["src/jjdiff/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
 
 [tool.ruff]
 fix = true

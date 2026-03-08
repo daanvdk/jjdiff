@@ -22,52 +22,41 @@ class Cursor(ABC):
         self.change = change
 
     @abstractmethod
-    def is_change_selected(self, change: int) -> bool:
-        raise NotImplementedError
+    def is_change_selected(self, change: int) -> bool: ...
 
     @abstractmethod
-    def is_title_selected(self, change: int) -> bool:
-        raise NotImplementedError
+    def is_title_selected(self, change: int) -> bool: ...
 
     @abstractmethod
-    def is_line_selected(self, change: int, line: int) -> bool:
-        raise NotImplementedError
+    def is_line_selected(self, change: int, line: int) -> bool: ...
 
     @abstractmethod
-    def is_all_lines_selected(self, change: int) -> bool:
-        raise NotImplementedError
+    def is_all_lines_selected(self, change: int) -> bool: ...
 
     @abstractmethod
-    def next(self, changes: Sequence[Change], opened: set[ChangeRef]) -> "Cursor":
-        raise NotImplementedError
+    def next(self, changes: Sequence[Change], opened: set[ChangeRef]) -> "Cursor": ...
 
     @abstractmethod
-    def prev(self, changes: Sequence[Change], opened: set[ChangeRef]) -> "Cursor":
-        raise NotImplementedError
+    def prev(self, changes: Sequence[Change], opened: set[ChangeRef]) -> "Cursor": ...
 
     @abstractmethod
-    def first(self, changes: Sequence[Change], opened: set[ChangeRef]) -> "Cursor":
-        raise NotImplementedError
+    def first(self, changes: Sequence[Change], opened: set[ChangeRef]) -> "Cursor": ...
 
     @abstractmethod
-    def last(self, changes: Sequence[Change], opened: set[ChangeRef]) -> "Cursor":
-        raise NotImplementedError
+    def last(self, changes: Sequence[Change], opened: set[ChangeRef]) -> "Cursor": ...
 
     @abstractmethod
     def grow(
         self, changes: Sequence[Change], opened: set[ChangeRef]
-    ) -> "Cursor | ChangeRef":
-        raise NotImplementedError
+    ) -> "Cursor | ChangeRef": ...
 
     @abstractmethod
     def shrink(
         self, changes: Sequence[Change], opened: set[ChangeRef]
-    ) -> "Cursor | ChangeRef":
-        raise NotImplementedError
+    ) -> "Cursor | ChangeRef": ...
 
     @abstractmethod
-    def refs(self, changes: Sequence[Change]) -> Iterator[Ref]:
-        raise NotImplementedError
+    def refs(self, changes: Sequence[Change]) -> Iterator[Ref]: ...
 
 
 class ChangeCursor(Cursor):
