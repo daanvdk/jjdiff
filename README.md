@@ -1,5 +1,6 @@
 # jjdiff
 [![PyPI](https://img.shields.io/pypi/v/jjdiff)](https://pypi.org/project/jjdiff/)
+<p align="center"><img src="https://raw.githubusercontent.com/daanvdk/jjdiff/refs/heads/main/screenshot.png" alt="screenshot" /></p>
 
 A TUI that can be used as a diff editor in the jujutsu vcs.
 
