@@ -225,7 +225,7 @@ def get_content_summary(content: Content) -> ContentSummary:
             if lines := split_lines(content_path):
                 return get_line_counts(lines)
             else:
-                return frozenset(map(stable_hash, get_binary_chunks(content_path)))
+                return frozenset(get_binary_chunks(content_path))
         case Symlink(to):
             return str(to)
 
@@ -302,16 +302,14 @@ HASH_MODULUS = (1 << 31) - 1
 HASH_BASE_POWER = pow(HASH_BASE, WINDOW_SIZE, HASH_MODULUS)
 
 
-def get_binary_chunks(path: Path) -> Iterator[memoryview]:
+def get_binary_chunks(path: Path) -> Iterator[bytes]:
     with (
         path.open("rb") as file,
         mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as raw_data,
+        memoryview(raw_data) as data,
     ):
-        # Wrap in memory view for zero copy chunks
-        data = memoryview(raw_data)
-
         if len(data) <= WINDOW_SIZE:
-            yield data
+            yield stable_hash(data)
             return
 
         curr_hash = 0
@@ -321,8 +319,7 @@ def get_binary_chunks(path: Path) -> Iterator[memoryview]:
         start = 0
         for i in range(WINDOW_SIZE, len(data)):
             if curr_hash & WINDOW_MASK == 0:
-                chunk = data[start:i]
-                yield chunk
+                yield stable_hash(data[start:i])
                 start = i
 
             old_byte = data[i - WINDOW_SIZE]
@@ -333,8 +330,7 @@ def get_binary_chunks(path: Path) -> Iterator[memoryview]:
             ) % HASH_MODULUS
             curr_hash = (curr_hash * HASH_BASE + new_byte) % HASH_MODULUS
 
-        if start < len(data):
-            yield data[start:]
+        yield stable_hash(data[start:])
 
 
 def stable_hash(data: memoryview) -> bytes:
