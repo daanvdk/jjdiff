@@ -216,7 +216,7 @@ def content_is_equal(old_content: Path, new_content: Path) -> bool:
         mmap.mmap(old_file.fileno(), 0, access=mmap.ACCESS_READ) as old_data,
         mmap.mmap(new_file.fileno(), 0, access=mmap.ACCESS_READ) as new_data,
     ):
-        return old_data == new_data
+        return memoryview(old_data) == memoryview(new_data)
 
 
 def get_content_summary(content: Content) -> ContentSummary:
