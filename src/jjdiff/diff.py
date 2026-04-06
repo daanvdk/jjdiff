@@ -3,12 +3,12 @@ import heapq
 import mmap
 import stat
 from collections import Counter
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from itertools import product
 from pathlib import Path
-from typing import override
+from typing import Literal, override
 
 from .change import (
     AddBinary,
@@ -364,109 +364,252 @@ def add_content(path: Path, content: Content) -> Change:
 def get_line_similarity(old: str, new: str) -> float:
     if old == new:
         return 1
+    elif not old or not new:
+        return 0
     else:
         return SequenceMatcher(None, old, new).ratio()
 
 
-def diff_lines(old: list[str], new: list[str]) -> list[Line]:
+def diff_lines(old: Sequence[str], new: Sequence[str]) -> list[Line]:
     old_stripped = [line.lstrip() for line in old]
     new_stripped = [line.lstrip() for line in new]
 
-    matcher = SequenceMatcher(None, old_stripped, new_stripped, autojunk=False)
     lines: list[Line] = []
+    old_start = 0
+    new_start = 0
 
-    for op, i1, i2, j1, j2 in matcher.get_opcodes():
-        match op:
-            case "equal":
-                lines.extend(
-                    Line(old_line, new_line)
-                    for old_line, new_line in zip(old[i1:i2], new[j1:j2])
-                )
-            case "insert":
-                lines.extend(Line(None, line) for line in new[j1:j2])
-            case "delete":
-                lines.extend(Line(line, None) for line in old[i1:i2])
-            case "replace":
-                lines.extend(diff_lines_precise(old[i1:i2], new[j1:j2]))
+    keep_sections = iter(_myers_keep_sections(old_stripped, new_stripped))
+
+    while True:
+        section = next(keep_sections, None)
+
+        if section is None:
+            old_end = len(old)
+            new_end = len(new)
+        else:
+            old_end = section.old_start
+            new_end = section.new_start
+
+        if old_start < old_end and new_start < new_end:
+            for op in _similarity_diff(
+                old, new, old_start, old_end, new_start, new_end
+            ):
+                if op == "add":
+                    old_line = None
+                else:
+                    old_line = old[old_start]
+                    old_start += 1
+
+                if op == "delete":
+                    new_line = None
+                else:
+                    new_line = new[new_start]
+                    new_start += 1
+
+                lines.append(Line(old_line, new_line))
+
+        elif old_start < old_end:
+            lines.extend(
+                Line(old[old_index], None) for old_index in range(old_start, old_end)
+            )
+        elif new_start < new_end:
+            lines.extend(
+                Line(None, new[new_index]) for new_index in range(new_start, new_end)
+            )
+
+        if section is None:
+            break
+
+        lines.extend(
+            Line(old[old_index], new[new_index])
+            for old_index, new_index in zip(
+                range(section.old_start, section.old_end),
+                range(section.new_start, section.new_end),
+            )
+        )
+
+        old_start = section.old_end
+        new_start = section.new_end
 
     return lines
 
 
-def diff_lines_precise(old: list[str], new: list[str]) -> list[Line]:
-    min_cost = 100 * abs(len(old) - len(new))
-    states: list[tuple[int, int, int, int, Line | None]] = [(min_cost, 0, 0, 0, None)]
-    line_to: dict[tuple[int, int], Line | None] = {}
+@dataclass(frozen=True)
+class Section:
+    old_start: int
+    old_end: int
+    new_start: int
+    new_end: int
+
+
+def _myers_keep_sections(old: list[str], new: list[str]) -> list[Section]:
+    old_len = len(old)
+    new_len = len(new)
+    reaches: list[dict[int, int]] = []
 
     while True:
-        min_cost, _, old_index, new_index, line = heapq.heappop(states)
+        edits = len(reaches)
 
-        if (old_index, new_index) in line_to:
+        if edits <= old_len:
+            min_diagonal = -edits
+        elif edits % 2 == old_len % 2:
+            min_diagonal = -old_len
+        else:
+            min_diagonal = -old_len + 1
+
+        reach: dict[int, int] = {}
+        prev_reach = reaches[-1] if reaches else {}
+
+        for diagonal in range(min_diagonal, min(edits, new_len) + 1, 2):
+            new_index = max(
+                prev_reach.get(diagonal - 1, -1) + 1,
+                prev_reach.get(diagonal + 1, 0),
+            )
+            old_index = new_index - diagonal
+
+            while (
+                old_index < old_len
+                and new_index < new_len
+                and old[old_index] == new[new_index]
+            ):
+                old_index += 1
+                new_index += 1
+
+            reach[diagonal] = new_index
+
+        reaches.append(reach)
+        if reach.get(new_len - old_len) == new_len:
+            break
+
+    sections: list[Section] = []
+    diagonal = new_len - old_len
+
+    for edits in reversed(range(1, len(reaches))):
+        prev_reach = reaches[edits - 1]
+        entry_index_add = prev_reach.get(diagonal - 1, -2) + 1
+        entry_index_delete = prev_reach.get(diagonal + 1, -1)
+        entry_index = max(entry_index_add, entry_index_delete)
+
+        new_index = reaches[edits][diagonal]
+        if entry_index < new_index:
+            section = Section(
+                entry_index - diagonal,
+                new_index - diagonal,
+                entry_index,
+                new_index,
+            )
+            sections.append(section)
+
+        if entry_index == entry_index_add:
+            diagonal = diagonal - 1
+        else:
+            diagonal = diagonal + 1
+
+    new_index = reaches[0][0]
+    if new_index > 0:
+        sections.append(Section(0, new_index, 0, new_index))
+
+    sections.reverse()
+    return sections
+
+
+type Op = Literal["add", "change", "delete"]
+type Pos = tuple[int, int]
+
+
+# This is kind of the reverse priority of how you want this to be ordered, this
+# key makes this operation have priority when it is the incoming operation for
+# a node. And thus actually prioritizes it to be the last operation to a node
+# where there would be multiple equivalent paths and thus show up later in the
+# ordering.
+OP_KEY: dict[Op, int] = {"add": 0, "delete": 1, "change": 2}
+
+
+@dataclass(frozen=True)
+class State:
+    source: tuple[Pos, Op] | None
+    old_start: int
+    old_end: int
+    new_start: int
+    new_end: int
+    cost: float
+
+    @property
+    def heuristic(self) -> int:
+        old_todo = self.old_end - self.old_start
+        new_todo = self.new_end - self.new_start
+        return abs(old_todo - new_todo)
+
+    def _key(self) -> tuple[float, int]:
+        assert self.source is not None
+        return (self.cost + self.heuristic, OP_KEY[self.source[1]])
+
+    def __lt__(self, other: "State", /) -> bool:
+        return self._key() < other._key()
+
+    @property
+    def pos(self) -> Pos:
+        return (self.old_start, self.new_start)
+
+    def derive(
+        self, op: Op, old_delta: int, new_delta: int, cost_delta: float
+    ) -> "State":
+        return State(
+            (self.pos, op),
+            self.old_start + old_delta,
+            self.old_end,
+            self.new_start + new_delta,
+            self.new_end,
+            self.cost + cost_delta,
+        )
+
+
+def _similarity_diff(
+    old: Sequence[str],
+    new: Sequence[str],
+    old_start: int,
+    old_end: int,
+    new_start: int,
+    new_end: int,
+) -> list[Op]:
+    states = [State(None, old_start, old_end, new_start, new_end, 0)]
+    sources: dict[Pos, tuple[Pos, Op] | None] = {}
+
+    while True:
+        state = heapq.heappop(states)
+
+        if state.pos in sources:
             continue
-        line_to[(old_index, new_index)] = line
+        sources[state.pos] = state.source
 
-        old_todo = len(old) - old_index
-        new_todo = len(new) - new_index
+        old_todo = old_end - state.old_start
+        new_todo = new_end - state.new_start
 
         if not old_todo and not new_todo:
-            lines: list[Line] = []
-
-            while line is not None:
-                lines.append(line)
-                if line.old is not None:
-                    old_index -= 1
-                if line.new is not None:
-                    new_index -= 1
-                line = line_to[old_index, new_index]
-
-            lines.reverse()
-            return lines
+            break
 
         if old_todo:
-            heapq.heappush(
-                states,
-                (
-                    # If we have more old_todo than new_todo the change to
-                    # the heuristic and the cost cancel eachother out,
-                    # otherwise they add up and thus get a cost of 2.
-                    min_cost + 200 * int(old_todo <= new_todo),
-                    2,
-                    old_index + 1,
-                    new_index,
-                    Line(old[old_index], None),
-                ),
-            )
+            heapq.heappush(states, state.derive("delete", 1, 0, 1))
 
         if new_todo:
-            heapq.heappush(
-                states,
-                (
-                    # If we have more new_todo than old_todo the change to
-                    # the heuristic and the cost cancel eachother out,
-                    # otherwise they add up and thus get a cost of 2.
-                    min_cost + 200 * int(new_todo <= old_todo),
-                    1,
-                    old_index,
-                    new_index + 1,
-                    Line(None, new[new_index]),
-                ),
-            )
+            heapq.heappush(states, state.derive("add", 0, 1, 1))
 
         if old_todo and new_todo:
-            old_line = old[old_index]
-            new_line = new[new_index]
-            similarity = get_line_similarity(old_line.lstrip(), new_line.lstrip())
+            old_line = old[state.old_start]
+            new_line = new[state.new_start]
+            similarity = get_line_similarity(old_line, new_line)
 
             if similarity >= SIMILARITY_THRESHOLD:
                 heapq.heappush(
-                    states,
-                    (
-                        # The cost scales with the similarity
-                        # similarity 0 -> cost 200 (same as deletion + addition)
-                        # similarity 1 -> cost   0 (no change)
-                        min_cost + (200 - round(similarity * 200)),
-                        0,
-                        old_index + 1,
-                        new_index + 1,
-                        Line(old_line, new_line),
-                    ),
+                    states, state.derive("change", 1, 1, 2 * (1 - similarity))
                 )
+
+    ops: list[Op] = []
+    pos = (old_end, new_end)
+
+    while source := sources[pos]:
+        pos, line = source
+        ops.append(line)
+
+    ops.reverse()
+    return ops

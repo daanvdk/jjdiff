@@ -14,7 +14,13 @@ from jjdiff.change import (
     ModifySymlink,
     Rename,
 )
-from jjdiff.diff import diff, diff_lines
+from jjdiff.diff import (
+    Section,
+    _myers_keep_sections,
+    _similarity_diff,
+    diff,
+    diff_lines,
+)
 
 from .utils import DirFactory, ExecFile
 
@@ -232,3 +238,119 @@ def test_diff_file_rename_with_modify(temp_dir_factory: DirFactory) -> None:
     assert changes[0] == Rename(Path("old.txt"), Path("new.txt"))
     assert isinstance(changes[1], ModifyFile)
     assert changes[1].path == Path("old.txt")
+
+
+# --- _myers_keep_sections ---
+
+
+def test_myers_keep_sections_identical() -> None:
+    sections = _myers_keep_sections(["a", "b", "c"], ["a", "b", "c"])
+    assert sections == [Section(0, 3, 0, 3)]
+
+
+def test_myers_keep_sections_no_common() -> None:
+    assert _myers_keep_sections(["a", "b"], ["c", "d"]) == []
+
+
+def test_myers_keep_sections_common_prefix() -> None:
+    sections = _myers_keep_sections(["a", "b", "old"], ["a", "b", "new"])
+    assert sections == [Section(0, 2, 0, 2)]
+
+
+def test_myers_keep_sections_common_suffix() -> None:
+    sections = _myers_keep_sections(["old", "a", "b"], ["new", "a", "b"])
+    assert sections == [Section(1, 3, 1, 3)]
+
+
+def test_myers_keep_sections_common_middle() -> None:
+    sections = _myers_keep_sections(
+        ["old1", "common", "old2"], ["new1", "common", "new2"]
+    )
+    assert sections == [Section(1, 2, 1, 2)]
+
+
+def test_myers_keep_sections_empty() -> None:
+    assert _myers_keep_sections([], []) == []
+
+
+def test_myers_keep_sections_insertion() -> None:
+    sections = _myers_keep_sections(["a", "b"], ["a", "x", "b"])
+    assert sections == [Section(0, 1, 0, 1), Section(1, 2, 2, 3)]
+
+
+# --- _similarity_diff ---
+
+
+def test_similarity_diff_only_deletes() -> None:
+    # More old than new: extra old lines must produce "delete" ops
+    ops = _similarity_diff(["foobar", "extra"], ["foobaz"], 0, 2, 0, 1)
+    assert ops.count("delete") == 1
+    assert ops.count("add") == 0
+    assert ops.count("change") == 1
+
+
+def test_similarity_diff_only_adds() -> None:
+    # More new than old: extra new lines must produce "add" ops
+    ops = _similarity_diff(["foobaz"], ["foobar", "extra"], 0, 1, 0, 2)
+    assert ops.count("add") == 1
+    assert ops.count("delete") == 0
+    assert ops.count("change") == 1
+
+
+def test_similarity_diff_dissimilar_no_change() -> None:
+    # "aaa" vs "bbb" have 0 similarity: only delete + add, no change
+    ops = _similarity_diff(["aaa"], ["bbb"], 0, 1, 0, 1)
+    assert "change" not in ops
+    assert "delete" in ops
+    assert "add" in ops
+
+
+def test_similarity_diff_similar_produces_change() -> None:
+    # "foobar" vs "foobaz" share enough chars (similarity ≈ 0.83 > 0.6)
+    ops = _similarity_diff(["foobar"], ["foobaz"], 0, 1, 0, 1)
+    assert ops == ["change"]
+
+
+# --- diff_lines: _similarity_diff integration ---
+
+
+def test_diff_lines_replace_more_old_than_new() -> None:
+    # "foobar"/"foobaz" are similar and pair as a change; "extra" has no match → deleted
+    result = diff_lines(["foobar", "extra"], ["foobaz"])
+    assert result == [Line("foobar", "foobaz"), Line("extra", None)]
+
+
+def test_diff_lines_replace_more_new_than_old() -> None:
+    result = diff_lines(["foobaz"], ["foobar", "extra"])
+    assert result == [Line("foobaz", "foobar"), Line(None, "extra")]
+
+
+def test_diff_lines_similar_pairs_matched_in_order() -> None:
+    # Both pairs are mutually similar; they should pair in order, not cross-match
+    result = diff_lines(["foo aaa", "foo bbb"], ["foo aab", "foo bbc"])
+    assert result == [Line("foo aaa", "foo aab"), Line("foo bbb", "foo bbc")]
+
+
+def test_diff_lines_dissimilar_not_paired() -> None:
+    # "aaa" and "bbb" share no characters (similarity 0 < 0.6): delete then add
+    result = diff_lines(["aaa"], ["bbb"])
+    assert result == [Line("aaa", None), Line(None, "bbb")]
+
+
+def test_diff_lines_keeps_unchanged_context() -> None:
+    # Lines identical before and after the change must remain unchanged
+    result = diff_lines(
+        ["header", "old body", "footer"], ["header", "new body", "footer"]
+    )
+    assert result[0] == Line("header", "header")
+    assert result[0].status == "unchanged"
+    assert result[-1] == Line("footer", "footer")
+    assert result[-1].status == "unchanged"
+
+
+def test_diff_lines_keeps_with_leading_whitespace() -> None:
+    # Myers strips leading whitespace: "  foo" and "foo" match in the first pass
+    result = diff_lines(["  foo", "bar"], ["foo", "bar"])
+    assert len(result) == 2
+    assert result[0] == Line("  foo", "foo")
+    assert result[1] == Line("bar", "bar")
