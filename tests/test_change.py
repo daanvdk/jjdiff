@@ -176,3 +176,39 @@ def test_get_line_dependencies_delete_file() -> None:
     ]
     deps = list(get_line_dependencies(changes))
     assert (ChangeRef(0), LineRef(0, 0)) in deps
+
+
+def test_rename_crash(temp_dir_factory: DirFactory) -> None:
+    old = temp_dir_factory(
+        {
+            "foo": "foo",
+        }
+    )
+    new = temp_dir_factory(
+        {
+            "foobar": "foo",
+            "bar": "bar",
+        }
+    )
+
+    old_to_new = diff(old, new)
+    assert old_to_new == [
+        AddFile(Path("bar"), [Line(None, "bar")], False),
+        Rename(Path("foo"), Path("foobar")),
+    ]
+
+    _, selected_to_new = split_changes(old_to_new, {ChangeRef(0), LineRef(0, 0)})
+    assert selected_to_new == [
+        Rename(Path("foo"), Path("foobar")),
+    ]
+
+    new_to_selected = reverse_changes(selected_to_new)
+    assert new_to_selected == [
+        Rename(Path("foobar"), Path("foo")),
+    ]
+
+    apply_changes(new, new_to_selected)
+    assert read_spec(new) == {
+        "foo": "foo",
+        "bar": "bar",
+    }
