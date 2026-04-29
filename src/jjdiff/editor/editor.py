@@ -64,6 +64,23 @@ class RemoveIncludes(Action):
         editor.included |= self.refs
 
 
+class Combined(Action):
+    actions: tuple[Action, ...]
+
+    def __init__(self, *actions: Action):
+        self.actions = actions
+
+    @override
+    def apply(self, editor: "Editor") -> None:
+        for action in self.actions:
+            action.apply(editor)
+
+    @override
+    def revert(self, editor: "Editor") -> None:
+        for action in reversed(self.actions):
+            action.revert(editor)
+
+
 class Editor(Console[Set[Ref] | None]):
     changes: Sequence[Change]
 
@@ -176,9 +193,34 @@ class Editor(Console[Set[Ref] | None]):
         self.select_refs(refs)
         self.next_cursor()
 
-    def select_all(self) -> None:
-        refs = get_all_refs(self.changes)
-        self.select_refs(refs)
+    def invert_selection(self) -> None:
+        refs = set(get_all_refs(self.changes)) - self.included
+
+        # shrink the selection by removing all refs for which the dependencies
+        # are not in the selection
+        while deps_not_met := {
+            dependant
+            for dependant in refs
+            if any(
+                dependency not in refs
+                for dependency in self.include_dependencies.get(dependant, set())
+            )
+        }:
+            refs -= deps_not_met
+
+        to_add = refs - self.included
+        to_remove = self.included - refs
+
+        if to_add and to_remove:
+            action = Combined(RemoveIncludes(to_remove), AddIncludes(to_add))
+        elif to_add:
+            action = AddIncludes(to_add)
+        elif to_remove:
+            action = RemoveIncludes(to_remove)
+        else:
+            return
+
+        self.apply_action(action)
         self.rerender()
 
     def select_refs(self, refs: Iterable[Ref]) -> None:
