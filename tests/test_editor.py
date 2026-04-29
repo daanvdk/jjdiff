@@ -146,18 +146,42 @@ def test_select_cursor() -> None:
     assert editor.cursor.change == 1
 
 
-def test_select_all() -> None:
+def test_invert_selection() -> None:
     editor = Editor([ModifyFile(Path("a.py"), [Line("old", "new")])])
-    editor.select_all()
+    editor.invert_selection()
     assert LineRef(0, 0) in editor.included
 
 
-def test_select_deselect_toggle() -> None:
+def test_invert_selection_toggle() -> None:
     editor = Editor([ModifyFile(Path("a.py"), [Line("old", "new")])])
-    editor.select_all()
+    editor.invert_selection()
     assert LineRef(0, 0) in editor.included
-    editor.select_all()
+    editor.invert_selection()
     assert LineRef(0, 0) not in editor.included
+
+
+def test_invert_selection_mixed_state() -> None:
+    editor = Editor(two_changes())
+    editor.select_refs([LineRef(0, 0)])
+    editor.invert_selection()
+    assert LineRef(0, 0) not in editor.included
+    assert LineRef(1, 0) in editor.included
+
+
+def test_invert_selection_shrinks_unmet_deps() -> None:
+    changes = [AddFile(Path("a.py"), [Line(None, "hello")], False)]
+    editor = Editor(changes)
+    editor.select_refs([LineRef(0, 0)])  # select only the line, not the file
+    editor.invert_selection()
+    # ChangeRef(0) would need LineRef(0, 0) but that gets deselected, so it's dropped
+    assert ChangeRef(0) not in editor.included
+    assert LineRef(0, 0) not in editor.included
+
+
+def test_invert_selection_no_op_does_not_push_undo() -> None:
+    editor = Editor([])
+    editor.invert_selection()
+    assert len(editor.undo_stack) == 0
 
 
 def test_select_includes_dependencies() -> None:
@@ -173,7 +197,7 @@ def test_deselect_includes_dependants() -> None:
     # AddFile: deselecting a LineRef auto-removes the ChangeRef (which depends on lines)
     changes = [AddFile(Path("a.py"), [Line(None, "hello")], False)]
     editor = Editor(changes)
-    editor.select_all()
+    editor.invert_selection()
     assert ChangeRef(0) in editor.included
     assert LineRef(0, 0) in editor.included
     editor.select_refs([LineRef(0, 0)])  # deselect the line
@@ -184,17 +208,17 @@ def test_deselect_includes_dependants() -> None:
 # --- Undo / redo ---
 
 
-def test_undo_select() -> None:
+def test_undo_invert_selection() -> None:
     editor = Editor([ModifyFile(Path("a.py"), [Line("old", "new")])])
-    editor.select_all()
+    editor.invert_selection()
     assert LineRef(0, 0) in editor.included
     editor.undo()
     assert LineRef(0, 0) not in editor.included
 
 
-def test_redo_select() -> None:
+def test_redo_invert_selection() -> None:
     editor = Editor([ModifyFile(Path("a.py"), [Line("old", "new")])])
-    editor.select_all()
+    editor.invert_selection()
     editor.undo()
     editor.redo()
     assert LineRef(0, 0) in editor.included
@@ -224,12 +248,12 @@ def test_redo_empty_does_nothing() -> None:
     assert editor.cursor.change == 0
 
 
-def test_select_clears_redo() -> None:
+def test_invert_selection_clears_redo() -> None:
     editor = Editor([ModifyFile(Path("a.py"), [Line("old", "new")])])
-    editor.select_all()
+    editor.invert_selection()
     editor.undo()
     assert len(editor.redo_stack) == 1
-    editor.select_all()
+    editor.invert_selection()
     assert len(editor.redo_stack) == 0
 
 
@@ -238,7 +262,7 @@ def test_select_clears_redo() -> None:
 
 def test_confirm() -> None:
     editor = Editor([ModifyFile(Path("a.py"), [Line("old", "new")])])
-    editor.select_all()
+    editor.invert_selection()
     editor.confirm()
     assert isinstance(editor._result, frozenset)
     assert LineRef(0, 0) in editor._result

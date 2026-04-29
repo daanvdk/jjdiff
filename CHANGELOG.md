@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 - Improved diffing algorithm to use a myers diff as base.
+- Removed `select_all` action in favor of an `invert_selection` action.
 
 ## [0.6.2] - 2026-04-06
 ### Fixed

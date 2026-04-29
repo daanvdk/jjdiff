@@ -31,7 +31,7 @@ class KeybindingsConfig(BaseModel):
     shrink_cursor: list[Key] = ["l", "right"]
     grow_cursor: list[Key] = ["h", "left"]
     select_cursor: list[Key] = ["space"]
-    select_all: list[Key] = ["a", "ctrl+a"]
+    invert_selection: list[Key] = ["i", "*"]
     confirm: list[Key] = ["enter"]
     undo: list[Key] = ["u"]
     redo: list[Key] = ["U"]
